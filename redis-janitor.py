@@ -55,6 +55,15 @@ class RedisJanitor():
             time.sleep(5)
 
     def redis_reset_status(self, key):
+        #while True:
+        #    try:
+        #        self.redis_client.hdel(key,"reason")
+        #        break
+        #    except ConnectionError:
+        #        # For some reason, we're unable to connect to Redis right now.
+        #        # Keep trying until we can.
+        #        self._logger.warn("Trouble connecting to Redis. Retrying.")
+        #        time.sleep(5)
         while True:
             try:
                 self.redis_client.hset(key,"status","new")
@@ -130,11 +139,17 @@ class RedisJanitor():
                 key_status = self.redis_hget(key, 'status')
                 if key_status not in endpoint_hashes:
                     host = self.redis_hget(key, 'hostname')
+                elif key_status == "failed":
+                    # key failed, so try it again
+                    self._logger.debug("Key " + key + " failed, so it's "
+                            + "being retried.")
+                    self.redis_reset_status(key)
+                    continue
                 else:
                     continue
             else:
                 continue
-            # verify host pod is running
+            # deal with health of host pod
             try:
                 re_search_string = host + " +\S+ +(\S+)"
             except TypeError:
