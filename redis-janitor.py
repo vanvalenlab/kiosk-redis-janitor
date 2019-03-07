@@ -1,42 +1,44 @@
-from decouple import config
-from redis import StrictRedis
-from redis.exceptions import ConnectionError
 import logging
 import subprocess
 import time
 import sys
 import re
+import os
+
+from redis import StrictRedis
+from redis.exceptions import ConnectionError
 
 class RedisJanitor():
     def __init__(self):
-        DEBUG = config('DEBUG', cast=bool, default=False)
-        self._initialize_logger(DEBUG)
+        # configure logger
+        self._configure_logger()
 
-        self._logger = logging.getLogger("redis-janitor.log")
-
-        REDIS_HOST = config('REDIS_HOST', default='redis-master')
-        REDIS_PORT = config('REDIS_PORT', default=6379, cast=int)
+        # establish Redis connection
+        REDIS_HOST = os.environ['REDIS_HOST']
+        REDIS_PORT = os.environ['REDIS_PORT']
         self.redis_client = StrictRedis(
             host=REDIS_HOST,
             port=REDIS_PORT,
             decode_responses=True,
             charset='utf-8')
 
-    def _initialize_logger(self, debug_mode=False):
-        self.logger = logging.getLogger()
-        self.logger.setLevel(logging.DEBUG)
-
+    def _configure_logger(self):
+        self._logger = logging.getLogger('autoscaler')
+        self._logger.setLevel(logging.DEBUG)
+        # Send logs to stdout so they can be read via Kubernetes.
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
-                '%(asctime)s -- [%(levelname)s]:[%(name)s]: %(message)s')
-        console = logging.StreamHandler(stream=sys.stdout)
-        console.setFormatter(formatter)
-
-        if debug_mode:
-            console.setLevel(logging.DEBUG)
-        else:
-            console.setLevel(logging.INFO)
-
-        self.logger.addHandler(console)
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        sh.setFormatter(formatter)
+        self._logger.addHandler(sh)
+        # Also send logs to a file for later inspection.
+        fh = logging.FileHandler('autoscaler.log')
+        fh.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        fh.setFormatter(formatter)
+        self._logger.addHandler(fh)
 
     def kill_pod(self, host):
         # delete pod
@@ -129,12 +131,14 @@ class RedisJanitor():
     def triage_keys(self):
         # get list of all pods
         pods = self.get_pod_string()
+        self._logger.debug("Got list of pods.")
         
-        endpoint_hashes =["new", "done", "failed"]
+        endpoint_hashes = ["new", "done", "failed"]
         keys = self.redis_get_keys()
+        self._logger.debug("Got all Redis keys.")
         for key in keys:
             # get name of host redis-consumer pod
-            key_type = self.red_get_key_type(key)
+            key_type = self.redis_get_key_type(key)
             if key_type == 'hash':
                 key_status = self.redis_hget(key, 'status')
                 if key_status not in endpoint_hashes:
@@ -179,15 +183,14 @@ class RedisJanitor():
                 self.redis_reset_status(key)
             else:
                 # looks like everything checked out for this record
-                pass
+                self._logger.debug("No problems with " + key + ".")
 
     def triage_keys_loop(self):
+        self._logger.debug("Entering key repair loop.")
         while True:
             self.triage_keys()
-            self._logger.debug("")
             self._logger.debug("Sleeping for 20 seconds.")
             time.sleep(20)
-            self._logger.debug("Exiting sleep.")
             self._logger.debug("")
 
 
