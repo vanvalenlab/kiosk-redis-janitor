@@ -23,7 +23,7 @@ class RedisJanitor():
             charset='utf-8')
 
     def _configure_logger(self):
-        self._logger = logging.getLogger('autoscaler')
+        self._logger = logging.getLogger('redis-janitor')
         self._logger.setLevel(logging.DEBUG)
         # Send logs to stdout so they can be read via Kubernetes.
         sh = logging.StreamHandler(sys.stdout)
@@ -33,7 +33,7 @@ class RedisJanitor():
         sh.setFormatter(formatter)
         self._logger.addHandler(sh)
         # Also send logs to a file for later inspection.
-        fh = logging.FileHandler('autoscaler.log')
+        fh = logging.FileHandler('redis-janitor.log')
         fh.setLevel(logging.DEBUG)
         formatter = logging.Formatter(
                 '%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -183,7 +183,8 @@ class RedisJanitor():
                 self.redis_reset_status(key)
             else:
                 # looks like everything checked out for this record
-                self._logger.debug("No problems with " + key + ".")
+                #self._logger.debug("No problems with " + key + ".")
+                pass
 
     def triage_keys_loop(self):
         self._logger.debug("Entering key repair loop.")
