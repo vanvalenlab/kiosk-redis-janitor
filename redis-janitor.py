@@ -55,7 +55,7 @@ class RedisJanitor():
                         parameters_list, type(err).__name__, err)
                 time.sleep(5)
     
-    def _get_pod_string(self):
+    def _get_pod_string(self, parameter_list):
         while True:
             try:
                 pods_info = subprocess.check_output(parameter_list)
