@@ -7,6 +7,8 @@ import os
 
 from redis import StrictRedis
 from redis.exceptions import ConnectionError
+from subprocess import CalledProcessError
+
 
 class RedisJanitor():
     def __init__(self):
@@ -40,9 +42,38 @@ class RedisJanitor():
         fh.setFormatter(formatter)
         self._logger.addHandler(fh)
 
+    def _make_kubectl_call(self, parameter_list):
+        while True:
+            try:
+                subprocess.run(parameter_list)
+                break
+            except CalledProcessError as err:
+                # For some reason, we can't execute this command right now.
+                # Keep trying until we can.
+                self._logger.warn("Trouble executing subprocess command " + 
+                        "using parameters %s. Retrying. %s: %s", 
+                        parameters_list, type(err).__name__, err)
+                time.sleep(5)
+    
+    def _get_pod_string(self):
+        while True:
+            try:
+                pods_info = subprocess.check_output(parameter_list)
+                pods = pods_info.__str__()
+                break
+            except CalledProcessError as err:
+                # For some reason, we can't execute this command right now.
+                # Keep trying until we can.
+                self._logger.warn("Trouble executing subprocess command " + 
+                        "using parameters %s. Retrying. %s: %s", 
+                        parameters_list, type(err).__name__, err)
+                time.sleep(5)
+        return pods
+
     def kill_pod(self, host):
         # delete pod
-        subprocess.run(["kubectl","delete","pods",host])
+        parameter_list = ["kubectl", "delete", "pods", host]
+        self._make_kubectl_call(parameter_list)
         # wait until it has terminated
         while True:
             pods = self.get_pod_string()
@@ -70,10 +101,11 @@ class RedisJanitor():
             try:
                 self.redis_client.hset(key,"status","new")
                 break
-            except ConnectionError:
+            except ConnectionError as err:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self._logger.warn("Trouble connecting to Redis. Retrying.")
+                self._logger.warn("Trouble connecting to Redis. Retrying. " +
+                        "%s: %s", type(err).__name__, err)
                 time.sleep(5)
     
     def redis_get_keys(self):
@@ -81,10 +113,11 @@ class RedisJanitor():
             try:
                 keys = self.redis_client.keys()
                 break
-            except ConnectionError:
+            except ConnectionError as err:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self._logger.warn("Trouble connecting to Redis. Retrying.")
+                self._logger.warn("Trouble connecting to Redis. Retrying. " +
+                        "%s: %s", type(err).__name__, err)
                 time.sleep(5)
         return keys
 
@@ -96,7 +129,8 @@ class RedisJanitor():
             except ConnectionError:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self._logger.warn("Trouble connecting to Redis. Retrying.")
+                self._logger.warn("Trouble connecting to Redis. Retrying. " +
+                        "%s: %s", type(err).__name__, err)
                 time.sleep(5)
         return key_type
 
@@ -108,7 +142,8 @@ class RedisJanitor():
             except ConnectionError:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self._logger.warn("Trouble connecting to Redis. Retrying.")
+                self._logger.warn("Trouble connecting to Redis. Retrying. " +
+                        "%s: %s", type(err).__name__, err)
                 time.sleep(5)
         return key_value
 
@@ -120,17 +155,15 @@ class RedisJanitor():
             except ConnectionError:
                 # For some reason, we're unable to connect to Redis right now.
                 # Keep trying until we can.
-                self._logger.warn("Trouble connecting to Redis. Retrying.")
+                self._logger.warn("Trouble connecting to Redis. Retrying. " +
+                        "%s: %s", type(err).__name__, err)
                 time.sleep(5)
         return key_values
 
-    def get_pod_string(self):
-        pods = subprocess.check_output(["kubectl","get","pods","-a"]).__str__()
-        return pods
-
     def triage_keys(self):
         # get list of all pods
-        pods = self.get_pod_string()
+        parameter_list = ["kubectl","get","pods","-a"]
+        pods = self._get_pod_string(parameter_list)
         self._logger.debug("Got list of pods.")
         
         endpoint_hashes = ["new", "done", "failed"]
