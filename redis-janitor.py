@@ -214,6 +214,20 @@ class RedisJanitor():
                         "Killing it and then resetting record " + key + ".")
                 self.kill_pod(host)
                 self.redis_reset_status(key)
+            # check whether the pod has had a status update in the last
+            # N seconds
+            timeout_seconds = 300
+            current_time = time.time() * 1000
+            last_update = self.redis_hget(key,'timestamp_last_status_update')
+            seconds_since_last_update = (current_time - last_update) / 1000
+            if seconds_since_last_update >= timeout_seconds:
+                # it has been more than (timeout_seconds) seconds since this
+                # entry was updated; we are assuming it's dead or something
+                self._logger.debug("Key " + key + " has not had its status"
+                        + " updated in " + str(timeout_seconds/60)
+                        + " minutes. Resetting key status now.")
+                self.redis_reset_status(key)
+                continue
             else:
                 # looks like everything checked out for this record
                 #self._logger.debug("No problems with " + key + ".")
