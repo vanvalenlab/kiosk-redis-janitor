@@ -170,7 +170,7 @@ class RedisJanitor():
         parameter_list = ["kubectl","get","pods","-a"]
         pods = self._get_pod_string(parameter_list)
         self._logger.debug("Got list of pods.")
-        endpoint_hashes = ["new", "done", "failed"]
+        endpoint_statuses = ["new", "done", "failed"]
         keys = self.redis_get_keys()
         self._logger.debug("Got all Redis keys.")
         for key in keys:
@@ -178,9 +178,10 @@ class RedisJanitor():
             key_type = self.redis_get_key_type(key)
             if key_type == 'hash':
                 key_status = self.redis_hget(key, 'status')
-                if key_status not in endpoint_hashes:
-                    host = self.redis_hget(key, 'hostname')
+                if key_status not in endpoint_statuses:
                     # is the pod processing this key alive?
+                    host = self.redis_hget(key, 'identity_preprocessing')
+                    re_search_string = host + " +\S+ +(\S+)"
                     try:
                         pod_status = re.search(re_search_string,pods).group(1)
                     except AttributeError:
