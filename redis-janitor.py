@@ -161,11 +161,12 @@ class RedisJanitor():
         return key_values
 
     def triage_keys(self):
+        # or, 1,000 reasons to restart a key
+
         # get list of all pods
         parameter_list = ["kubectl","get","pods","-a"]
         pods = self._get_pod_string(parameter_list)
         self._logger.debug("Got list of pods.")
-        
         endpoint_hashes = ["new", "done", "failed"]
         keys = self.redis_get_keys()
         self._logger.debug("Got all Redis keys.")
@@ -176,62 +177,49 @@ class RedisJanitor():
                 key_status = self.redis_hget(key, 'status')
                 if key_status not in endpoint_hashes:
                     host = self.redis_hget(key, 'hostname')
+                    # is the pod processing this key alive?
+                    try:
+                        pod_status = re.search(re_search_string,pods).group(1)
+                    except AttributeError:
+                        # no record of the pod was found
+                        # reset this job's status
+                        self._logger.debug("Pod " + host + " is awol. " +
+                                "Resetting record " + key + ".")
+                        self.redis_reset_status(key)
+                        continue
+                    # the pod's still around, but is something wrong with it?
+                    if pod_status != "Running":
+                        # we need to make sure it gets killed
+                        # and then reset the status of the job
+                        self._logger.debug("Pod " + host + " is in status " +
+                                pod_status + ". " +
+                                "Killing it and then resetting record " +
+                                key + ".")
+                        self.kill_pod(host)
+                        self.redis_reset_status(key)
+                        continue
+                    # has the key's status been updated in the last N seconds?
+                    timeout_seconds = 300
+                    current_time = time.time() * 1000
+                    last_update = self.redis_hget(key,
+                            'timestamp_last_status_update')
+                    seconds_since_last_update = \
+                            (current_time - last_update) / 1000
+                    if seconds_since_last_update >= timeout_seconds:
+                        # It has been more than (timeout_seconds) seconds
+                        # since this entry was updated.
+                        # We are assuming it's dead or something.
+                        self._logger.debug("Key " + key + " has not had its " +
+                                "status updated in " + str(timeout_seconds/60)
+                                + " minutes. Resetting key status now.")
+                        self.redis_reset_status(key)
+                        continue
                 elif key_status == "failed":
                     # key failed, so try it again
                     self._logger.debug("Key " + key + " failed, so it's "
                             + "being retried.")
                     self.redis_reset_status(key)
                     continue
-                else:
-                    continue
-            else:
-                continue
-            # deal with health of host pod
-            try:
-                re_search_string = host + " +\S+ +(\S+)"
-            except TypeError:
-                key_info = self.redis_hgetall(key)
-                self._logger.warn("This key is broked: " + key + ". " + 
-                        "Resetting record's status.")
-                self._logger.warn(key_info)
-                self.redis_reset_status(key)
-                continue
-            try:
-                pod_status = re.search(re_search_string,pods).group(1)
-            except AttributeError:
-                # no record of the pod was found
-                # reset this job's status
-                self._logger.debug("Pod " + host + " is awol. " +
-                        "Resetting record " + key + ".")
-                self.redis_reset_status(key)
-                continue
-            if pod_status != "Running":
-                # the pod's still around, but something's wrong with it
-                # we need to make sure it gets killed
-                # and then reset the status of the job
-                self._logger.debug("Pod " + host + " is in status " + 
-                        pod_status + ". " + 
-                        "Killing it and then resetting record " + key + ".")
-                self.kill_pod(host)
-                self.redis_reset_status(key)
-            # check whether the pod has had a status update in the last
-            # N seconds
-            timeout_seconds = 300
-            current_time = time.time() * 1000
-            last_update = self.redis_hget(key,'timestamp_last_status_update')
-            seconds_since_last_update = (current_time - last_update) / 1000
-            if seconds_since_last_update >= timeout_seconds:
-                # it has been more than (timeout_seconds) seconds since this
-                # entry was updated; we are assuming it's dead or something
-                self._logger.debug("Key " + key + " has not had its status"
-                        + " updated in " + str(timeout_seconds/60)
-                        + " minutes. Resetting key status now.")
-                self.redis_reset_status(key)
-                continue
-            else:
-                # looks like everything checked out for this record
-                #self._logger.debug("No problems with " + key + ".")
-                pass
 
     def triage_keys_loop(self):
         self._logger.debug("Entering key repair loop.")
@@ -240,7 +228,6 @@ class RedisJanitor():
             self._logger.debug("Sleeping for 20 seconds.")
             time.sleep(20)
             self._logger.debug("")
-
 
 if __name__=='__main__':
     rj = RedisJanitor()
