@@ -12,6 +12,9 @@ from subprocess import CalledProcessError
 
 class RedisJanitor():
     def __init__(self):
+        # configure variables
+        self._repairs = 0
+
         # configure logger
         self._configure_logger()
 
@@ -162,7 +165,7 @@ class RedisJanitor():
 
     def triage_keys(self):
         # or, 1,000 reasons to restart a key
-
+        repairs = 0
         # get list of all pods
         parameter_list = ["kubectl","get","pods","-a"]
         pods = self._get_pod_string(parameter_list)
@@ -186,6 +189,8 @@ class RedisJanitor():
                         self._logger.debug("Pod " + host + " is awol. " +
                                 "Resetting record " + key + ".")
                         self.redis_reset_status(key)
+                        repairs = repairs + 1
+                        self._repairs = self._repairs + 1
                         continue
                     # the pod's still around, but is something wrong with it?
                     if pod_status != "Running":
@@ -197,6 +202,8 @@ class RedisJanitor():
                                 key + ".")
                         self.kill_pod(host)
                         self.redis_reset_status(key)
+                        repairs = repairs + 1
+                        self._repairs = self._repairs + 1
                         continue
                     # has the key's status been updated in the last N seconds?
                     timeout_seconds = 300
@@ -213,13 +220,21 @@ class RedisJanitor():
                                 "status updated in " + str(timeout_seconds/60)
                                 + " minutes. Resetting key status now.")
                         self.redis_reset_status(key)
+                        repairs = repairs + 1
+                        self._repairs = self._repairs + 1
                         continue
                 elif key_status == "failed":
                     # key failed, so try it again
                     self._logger.debug("Key " + key + " failed, so it's "
                             + "being retried.")
                     self.redis_reset_status(key)
+                    repairs = repairs + 1
+                    self._repairs = self._repairs + 1
                     continue
+        self._logger.info("Keys repaired this loop: %s", repairs)
+        self._logger.info("Keys repaired over all loops: %s", self._repairs)
+        self._logger.info("")
+
 
     def triage_keys_loop(self):
         self._logger.debug("Entering key repair loop.")
