@@ -79,7 +79,7 @@ class RedisJanitor():
         self._make_kubectl_call(parameter_list)
         # wait until it has terminated
         while True:
-            pods = self.get_pod_string()
+            pods = self._get_pod_string()
             re_search_string = host + " +\S+ +(\S+)"
             try:
                 pod_status = re.search(re_search_string,pods_str).group(1)
@@ -181,6 +181,12 @@ class RedisJanitor():
                 if key_status not in endpoint_statuses:
                     # is the pod processing this key alive?
                     host = self.redis_hget(key, 'identity_preprocessing')
+                    if not host:
+                        # This is a malformed entry.
+                        # Just logging for now.
+                        self._logger.debug("Entry %s is malformed. %s", key,
+                                self.redis_hgetall(key))
+                        continue
                     re_search_string = host + " +\S+ +(\S+)"
                     try:
                         pod_status = re.search(re_search_string,pods).group(1)
@@ -209,10 +215,18 @@ class RedisJanitor():
                     # has the key's status been updated in the last N seconds?
                     timeout_seconds = 300
                     current_time = time.time() * 1000
-                    last_update = self.redis_hget(key,
-                            'timestamp_last_status_update')
-                    seconds_since_last_update = \
-                            (current_time - last_update) / 1000
+                    last_update = float(self.redis_hget(key,
+                            'timestamp_last_status_update'))
+                    try:
+                        seconds_since_last_update = \
+                                (current_time - last_update) / 1000
+                    except TypeError as err:
+                        self._logger.info("Key %s with information %s has " +
+                                "no appropriate timestamp_last_status_update"
+                                + " field. %s: %s", key,
+                                self.redis_hgetall(key),
+                                type(err).__name__, err)
+                        continue
                     if seconds_since_last_update >= timeout_seconds:
                         # It has been more than (timeout_seconds) seconds
                         # since this entry was updated.
