@@ -119,10 +119,19 @@ class RedisJanitor():
             Iterator of all hashes with a valid status
         """
         match = '%s*' % str(prefix).lower() if prefix is not None else None
-        for key in self.scan_iter(match=match):
-            # Check if the key is a hash
-            if self._redis_get_key_type(key) == 'hash':
-                yield key
+        self._logger.debug(
+                "Getting list of all redis keys containing string %s.", match)
+        while True:
+            try:
+                keys_iter = self.scan_iter(match=match):
+                break
+            except ConnectionError:
+                # For some reason, we're unable to connect to Redis right now.
+                # Keep trying until we can.
+                self._logger.warn("Trouble connecting to Redis. Retrying. " +
+                        "%s: %s", type(err).__name__, err)
+                time.sleep(5)
+        return key_iter
 
     def _redis_get_key_type(self, key):
         while True:
@@ -174,76 +183,77 @@ class RedisJanitor():
         keys_iterator = self._redis_iter_hashes()
         self._logger.debug("Got all Redis keys.")
         for key in keys_iterator:
-            # get name of host redis-consumer pod
-            key_status = self.redis_hget(key, 'status')
-            if key_status not in endpoint_statuses:
-                # is the pod processing this key alive?
-                host = self.redis_hget(key, 'identity_preprocessing')
-                if not host:
-                    # This is a malformed entry.
-                    # Just logging for now.
-                    self._logger.debug("Entry %s is malformed. %s", key,
-                            self.redis_hgetall(key))
-                    continue
-                re_search_string = host + " +\S+ +(\S+)"
-                try:
-                    pod_status = re.search(re_search_string,pods).group(1)
-                except AttributeError:
-                    # no record of the pod was found
-                    # reset this job's status
-                    self._logger.debug("Pod " + host + " is awol. " +
-                            "Resetting record " + key + ".")
+            # Check if the key is a hash
+            if self._redis_get_key_type(key) == 'hash':
+                key_status = self.redis_hget(key, 'status')
+                if key_status not in endpoint_statuses:
+                    # is the pod processing this key alive?
+                    host = self.redis_hget(key, 'identity_preprocessing')
+                    if not host:
+                        # This is a malformed entry.
+                        # Just logging for now.
+                        self._logger.debug("Entry %s is malformed. %s", key,
+                                self.redis_hgetall(key))
+                        continue
+                    re_search_string = host + " +\S+ +(\S+)"
+                    try:
+                        pod_status = re.search(re_search_string,pods).group(1)
+                    except AttributeError:
+                        # no record of the pod was found
+                        # reset this job's status
+                        self._logger.debug("Pod " + host + " is awol. " +
+                                "Resetting record " + key + ".")
+                        self.redis_reset_status(key)
+                        repairs = repairs + 1
+                        self._repairs = self._repairs + 1
+                        continue
+                    # the pod's still around, but is something wrong with it?
+                    if pod_status != "Running":
+                        # we need to make sure it gets killed
+                        # and then reset the status of the job
+                        self._logger.debug("Pod " + host + " is in status " +
+                                pod_status + ". " +
+                                "Killing it and then resetting record " +
+                                key + ".")
+                        self.kill_pod(host)
+                        self.redis_reset_status(key)
+                        repairs = repairs + 1
+                        self._repairs = self._repairs + 1
+                        continue
+                    # has the key's status been updated in the last N seconds?
+                    timeout_seconds = 300
+                    current_time = time.time() * 1000
+                    last_update = float(self.redis_hget(key,
+                            'timestamp_last_status_update'))
+                    try:
+                        seconds_since_last_update = \
+                                (current_time - last_update) / 1000
+                    except TypeError as err:
+                        self._logger.info("Key %s with information %s has " +
+                                "no appropriate timestamp_last_status_update"
+                                + " field. %s: %s", key,
+                                self.redis_hgetall(key),
+                                type(err).__name__, err)
+                        continue
+                    if seconds_since_last_update >= timeout_seconds:
+                        # It has been more than (timeout_seconds) seconds
+                        # since this entry was updated.
+                        # We are assuming it's dead or something.
+                        self._logger.debug("Key " + key + " has not had its " +
+                                "status updated in " + str(timeout_seconds/60)
+                                + " minutes. Resetting key status now.")
+                        self.redis_reset_status(key)
+                        repairs = repairs + 1
+                        self._repairs = self._repairs + 1
+                        continue
+                elif key_status == "failed":
+                    # key failed, so try it again
+                    self._logger.debug("Key " + key + " failed, so it's "
+                            + "being retried.")
                     self.redis_reset_status(key)
                     repairs = repairs + 1
                     self._repairs = self._repairs + 1
                     continue
-                # the pod's still around, but is something wrong with it?
-                if pod_status != "Running":
-                    # we need to make sure it gets killed
-                    # and then reset the status of the job
-                    self._logger.debug("Pod " + host + " is in status " +
-                            pod_status + ". " +
-                            "Killing it and then resetting record " +
-                            key + ".")
-                    self.kill_pod(host)
-                    self.redis_reset_status(key)
-                    repairs = repairs + 1
-                    self._repairs = self._repairs + 1
-                    continue
-                # has the key's status been updated in the last N seconds?
-                timeout_seconds = 300
-                current_time = time.time() * 1000
-                last_update = float(self.redis_hget(key,
-                        'timestamp_last_status_update'))
-                try:
-                    seconds_since_last_update = \
-                            (current_time - last_update) / 1000
-                except TypeError as err:
-                    self._logger.info("Key %s with information %s has " +
-                            "no appropriate timestamp_last_status_update"
-                            + " field. %s: %s", key,
-                            self.redis_hgetall(key),
-                            type(err).__name__, err)
-                    continue
-                if seconds_since_last_update >= timeout_seconds:
-                    # It has been more than (timeout_seconds) seconds
-                    # since this entry was updated.
-                    # We are assuming it's dead or something.
-                    self._logger.debug("Key " + key + " has not had its " +
-                            "status updated in " + str(timeout_seconds/60)
-                            + " minutes. Resetting key status now.")
-                    self.redis_reset_status(key)
-                    repairs = repairs + 1
-                    self._repairs = self._repairs + 1
-                    continue
-            elif key_status == "failed":
-                # key failed, so try it again
-                self._logger.debug("Key " + key + " failed, so it's "
-                        + "being retried.")
-                self.redis_reset_status(key)
-                repairs = repairs + 1
-                self._repairs = self._repairs + 1
-                continue
         self._logger.info("Keys repaired this loop: %s", repairs)
         self._logger.info("Keys repaired over all loops: %s", self._repairs)
         self._logger.info("")
