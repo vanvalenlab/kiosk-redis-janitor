@@ -27,57 +27,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-import sys
-import time
-import logging
+from redis_janitor.janitors import RedisJanitor
 
-import redis
-
-from redis_janitor import RedisJanitor
-
-
-def initialize_logger(debug_mode=False):
-    logger = logging.getLogger()
-    logger.setLevel(logging.DEBUG)
-
-    formatter = logging.Formatter('[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
-    console = logging.StreamHandler(stream=sys.stdout)
-    console.setFormatter(formatter)
-
-    fh = logging.FileHandler('redis-janitor.log')
-    fh.setFormatter(formatter)
-
-    if debug_mode:
-        console.setLevel(logging.DEBUG)
-        fh.setLevel(logging.DEBUG)
-    else:
-        console.setLevel(logging.INFO)
-        fh.setLevel(logging.INFO)
-
-    logger.addHandler(console)
-    logger.addHandler(fh)
-
-
-if __name__ == '__main__':
-    INTERVAL = int(os.getenv('INTERVAL', '20'))
-
-    initialize_logger(debug_mode=True)
-
-    _logger = logging.getLogger(__file__)
-
-    REDIS = redis.StrictRedis(
-        host=os.getenv('REDIS_HOST'),
-        port=os.getenv('REDIS_PORT'),
-        decode_responses=True,
-        charset='utf-8')
-
-    janitor = RedisJanitor(redis_client=REDIS)
-
-    while True:
-        try:
-            janitor.triage_keys()
-            time.sleep(INTERVAL)
-        except Exception as err:  # pylint: disable=broad-except
-            _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
-            sys.exit(1)
+del absolute_import
+del division
+del print_function
