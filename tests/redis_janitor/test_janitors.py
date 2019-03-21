@@ -96,15 +96,20 @@ class DummyRedis(object):
             raise redis.exceptions.ConnectionError('thrown on purpose')
         if field == 'status':
             return rhash.split('_')[1]
-        elif field == 'file_name':
-            return rhash.split('_')[-1]
-        elif field == 'input_file_name':
-            return rhash.split('_')[-1]
-        elif field == 'output_file_name':
-            return rhash.split('_')[-1]
         elif field == 'identity_preprocessing':
-            return 'good_pod'
-        return False
+            if 'good' in rhash:
+                return 'good_pod'
+            elif 'badhost' in rhash:
+                return None
+            else:
+                return 'bad_pod'
+        elif field == 'timestamp_last_status_update':
+            if 'malformed' in rhash:
+                return None
+            if 'good' in rhash:
+                return time.time()
+            return time.time() - 400000
+        return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
         if self.fail_count < self.fail_tolerance:
@@ -180,25 +185,6 @@ class TestJanitor(object):
         redis_client = DummyRedis(fail_tolerance=0)
         janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
 
-        def hget(key, value):
-            if value == 'status':
-                return key.split('_')[1]
-            elif value == 'identity_preprocessing':
-                if 'good' in key:
-                    return 'good_pod'
-                elif 'badhost' in key:
-                    return None
-                else:
-                    return 'bad_pod'
-            elif value == 'timestamp_last_status_update':
-                if 'malformed' in key:
-                    return None
-                if 'good' in key:
-                    return time.time()
-                return time.time() - 400000
-            return None
-
-        janitor.hget = hget
         janitor.kill_pod = lambda x: True
 
         good_pod = 'good_pod status Running'
@@ -226,3 +212,14 @@ class TestJanitor(object):
 
         # test in progress with status = Running with fresh update time
         assert janitor.triage('goodmalformed_inprogress', good_pod) is False
+
+    def test_triage_keys(self):
+        redis_client = DummyRedis(fail_tolerance=0)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+
+        # monkey-patch kubectl commands
+        janitor.kill_pod = lambda x: True
+        janitor._get_pod_string = lambda x: 'good_pod status Running'
+
+        # run triage_keys
+        janitor.triage_keys()
