@@ -219,7 +219,7 @@ class RedisJanitor(object):
         self.logger.debug('Got list of pods.')
 
         for key in self.scan_iter():
-            if self._redis_type(key) != 'hash':
+            if self._redis_type(key) == 'hash':
                 key_repaired = self.triage(key, pods)
                 num_repaired = int(key_repaired)
                 repairs += num_repaired
