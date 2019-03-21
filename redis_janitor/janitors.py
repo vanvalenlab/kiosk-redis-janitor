@@ -185,15 +185,16 @@ class RedisJanitor(object):
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
             current_time = time.time() * 1000
-            last_update = float(self.hget(key, 'timestamp_last_status_update'))
 
             try:
+                last_update = float(self.hget(key, 'timestamp_last_status_update'))
                 seconds_since_last_update = (current_time - last_update) / 1000
             except TypeError as err:
                 self.logger.info('Key %s with information %s has no '
                                  'appropriate timestamp_last_status_update '
                                  'field. %s: %s', key, self.hgetall(key),
                                  type(err).__name__, err)
+                return False
 
             if seconds_since_last_update >= timeout_seconds:
                 # This entry has not been updated in at least `timeout_seconds`
@@ -209,6 +210,8 @@ class RedisJanitor(object):
             self.logger.debug('Key %s failed so it is being retried.', key)
             self.hset(key, 'status', 'new')
             return True
+
+        return False
 
     def triage_keys(self):
         # or, 1,000 reasons to restart a key
