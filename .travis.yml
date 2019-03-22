@@ -18,7 +18,7 @@ install:
   - pip install pytest pytest-cov==2.5.1 pytest-pep8 coveralls
 
 script:
-  - python -m pytest --cov=redis_janitor --pep8 redis_janitor tests
+  - pytest --cov=redis_janitor --pep8 redis_janitor
 
 jobs:
   include:
