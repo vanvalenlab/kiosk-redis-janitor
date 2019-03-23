@@ -37,7 +37,7 @@ import subprocess
 import redis
 
 
-class RedisJanitor(object):
+class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
     def __init__(self, redis_client, backoff=3):
         self.redis_client = redis_client
@@ -48,7 +48,13 @@ class RedisJanitor(object):
     def _make_kubectl_call(self, parameter_list):
         while True:
             try:
+                t = timeit.default_timer()
+                self.logger.debug('Executing subprocess: `%s`.',
+                                  ' '.join(parameter_list))
                 subprocess.run(parameter_list)
+                self.logger.debug('Executed subprocess: `%s` in %s seconds.',
+                                  ' '.join(parameter_list),
+                                  timeit.default_timer() - t)
                 break
             except subprocess.CalledProcessError as err:
                 # For some reason, we can't execute this command right now.
@@ -62,8 +68,14 @@ class RedisJanitor(object):
     def _get_pod_string(self, parameter_list):
         while True:
             try:
+                t = timeit.default_timer()
+                self.logger.debug('Executing subprocess: `%s`.',
+                                  ' '.join(parameter_list))
                 pods_info = subprocess.check_output(parameter_list)
                 pods = pods_info.__str__()
+                self.logger.debug('Executed subprocess: `%s` in %s seconds.',
+                                  ' '.join(parameter_list),
+                                  timeit.default_timer() - t)
                 break
             except subprocess.CalledProcessError as err:
                 # For some reason, we can't execute this command right now.
@@ -84,6 +96,7 @@ class RedisJanitor(object):
                 pods_str = self._get_pod_string(parameter_list)
                 _ = re.search(r'%s +\S+ +(\S+)' % host, pods_str).group(1)
             except AttributeError:
+                self.logger.info('Pod %s successfully deleted', host)
                 break  # pod no longer exists
             self.logger.debug('Waiting for pod deletion for %s. '
                               'Sleeping for %s seconds.', host, self.backoff)
@@ -161,13 +174,13 @@ class RedisJanitor(object):
             host = self.hget(key, 'identity_started')
 
             if not host:
-                self.logger.debug('Entry `%s` is malformed. %s', key, self.hgetall(key))
+                self.logger.info('Entry `%s` is malformed. %s', key, self.hgetall(key))
                 return False
 
             try:
                 pod_status = re.search(r'%s +\S+ +(\S+)' % host, pods).group(1)
             except AttributeError:  # pod not found, reset the status
-                self.logger.debug('Pod %s is AWOL. Resetting record %s.', host, key)
+                self.logger.info('Pod %s is AWOL. Resetting record %s.', host, key)
                 self.hset(key, 'status', 'new')
                 return True
 
@@ -175,9 +188,9 @@ class RedisJanitor(object):
             if pod_status != 'Running':
                 # we need to make sure it gets killed
                 # and then reset the status of the job
-                self.logger.debug('Pod %s is in status `%s`.  Killing it '
-                                  'and then resetting record %s.',
-                                  host, pod_status, key)
+                self.logger.info('Pod %s is in status `%s`.  Killing it '
+                                 'and then resetting record %s.',
+                                 host, pod_status, key)
                 self.kill_pod(host)
                 self.hset(key, 'status', 'new')
                 return True
@@ -199,15 +212,17 @@ class RedisJanitor(object):
             if seconds_since_last_update >= timeout_seconds:
                 # This entry has not been updated in at least `timeout_seconds`
                 # Assume it has died, and reset the status
-                self.logger.debug('Key %s has not had its status '
-                                  'updated in %s seconds. Resetting '
-                                  'key status now.', key, timeout_seconds)
+                self.logger.info('Key `%s` has not been updated in %s seconds.'
+                                 ' Resetting its status now.',
+                                 key, seconds_since_last_update)
                 self.hset(key, 'status', 'new')
                 return True
 
         elif key_status == 'failed':  # TODO: should we restart all failures?
             # key failed, so try it again
-            self.logger.debug('Key %s failed so it is being retried.', key)
+            failure_reason = self.hget(key, 'reason')
+            self.logger.info('Key %s failed due to "%s". Resetting its '
+                             'status now.', key, failure_reason)
             self.hset(key, 'status', 'new')
             return True
 
@@ -219,7 +234,7 @@ class RedisJanitor(object):
 
         # get list of all pods
         pods = self._get_pod_string(['kubectl', 'get', 'pods', '-a'])
-        self.logger.debug('Got list of pods.')
+        self.logger.debug('Found pods: %s', pods)
 
         for key in self.scan_iter():
             if self._redis_type(key) == 'hash':
@@ -228,6 +243,9 @@ class RedisJanitor(object):
                 repairs += num_repaired
                 self._repairs += num_repaired
 
-        self.logger.info('Keys repaired this loop: %s', repairs)
-        self.logger.info('Keys repaired over all loops: %s', self._repairs)
-        self.logger.info('')
+        if repairs:
+            self.logger.info('Repaired %s keys.', repairs)
+        else:
+            self.logger.info('No keys currently require repairs.')
+
+        self.logger.info('Total keys repaired: %s', self._repairs)
