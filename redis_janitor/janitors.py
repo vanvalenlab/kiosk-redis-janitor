@@ -229,11 +229,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
         for key in self.scan_iter():
             if self._redis_type(key) == 'hash':
-                self.logger.debug('Triaging key `%s`.', key)
                 start = timeit.default_timer()
                 key_repaired = self.triage(key, pods)
-                self.logger.debug('Triaged key `%s` in %s seconds.',
-                                  key, timeit.default_timer() - start)
                 num_repaired = int(key_repaired)
                 repairs += num_repaired
                 self._repairs += num_repaired
