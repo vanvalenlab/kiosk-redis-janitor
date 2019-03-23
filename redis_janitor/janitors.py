@@ -158,10 +158,10 @@ class RedisJanitor(object):
         if key_status not in {'new', 'done', 'failed'}:
             # is the pod processing this key alive?
             # TODO: why preprocessing host? why not started?
-            host = self.hget(key, 'identity_preprocessing')
+            host = self.hget(key, 'identity_started')
 
             if not host:
-                self.logger.debug('Entry %s is malformed. %s', key, self.hgetall(key))
+                self.logger.debug('Entry `%s` is malformed. %s', key, self.hgetall(key))
                 return False
 
             try:
