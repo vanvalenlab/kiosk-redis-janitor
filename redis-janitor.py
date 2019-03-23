@@ -77,6 +77,7 @@ if __name__ == '__main__':
     while True:
         try:
             janitor.triage_keys()
+            _logger.debug('Sleeping for %s seconds.', INTERVAL)
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
