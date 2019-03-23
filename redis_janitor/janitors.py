@@ -45,60 +45,54 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
 
-    def _make_kubectl_call(self, parameter_list):
+    def _make_kubectl_call(self, args):
+        argstring = ' '.join(args)
         while True:
             try:
                 t = timeit.default_timer()
-                self.logger.debug('Executing subprocess: `%s`.',
-                                  ' '.join(parameter_list))
-                subprocess.run(parameter_list)
+                subprocess.run(args)
                 self.logger.debug('Executed subprocess: `%s` in %s seconds.',
-                                  ' '.join(parameter_list),
-                                  timeit.default_timer() - t)
+                                  argstring, timeit.default_timer() - t)
                 break
             except subprocess.CalledProcessError as err:
                 # For some reason, we can't execute this command right now.
                 # Keep trying until we can.
-                self.logger.warning('Encountered %s: %s while executing with '
-                                    'parameters: %s. Retrying in %s seconds...',
-                                    parameter_list, type(err).__name__, err,
-                                    self.backoff)
+                self.logger.warning('Encountered %s: %s while executing `%s`. '
+                                    'Retrying in %s seconds...', argstring,
+                                    type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
 
-    def _get_pod_string(self, parameter_list):
+    def _get_pod_string(self, args):
+        argstring = ' '.join(args)
         while True:
             try:
                 t = timeit.default_timer()
-                self.logger.debug('Executing subprocess: `%s`.',
-                                  ' '.join(parameter_list))
-                pods_info = subprocess.check_output(parameter_list)
-                pods = pods_info.__str__()
-                self.logger.debug('Executed subprocess: `%s` in %s seconds.',
-                                  ' '.join(parameter_list),
-                                  timeit.default_timer() - t)
+                pods_info = subprocess.check_output(args)
+                pods = pods_info.decode('utf8')
+                self.logger.info('Executed subprocess: `%s` in %s seconds.',
+                                 argstring, timeit.default_timer() - t)
                 break
             except subprocess.CalledProcessError as err:
                 # For some reason, we can't execute this command right now.
                 # Keep trying until we can.
-                self.logger.warning('Encountered %s: %s while executing with '
-                                    'parameters: %s.  etrying in %s seconds...',
-                                    parameter_list, type(err).__name__, err,
-                                    self.backoff)
+                self.logger.warning('Encountered %s: %s while executing `%s`. '
+                                    'Retrying in %s seconds...', argstring,
+                                    type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
-        return pods
+        return '\n'.join(x for x in pods.splitlines() if x)
 
     def kill_pod(self, host):
         # delete the pod
-        parameter_list = ['kubectl', 'delete', 'pods', host]
-        self._make_kubectl_call(parameter_list)
+        kill_args = ['kubectl', 'delete', 'pods', host]
+        self._make_kubectl_call(kill_args)
         while True:  # wait until it has terminated
             try:
-                pods_str = self._get_pod_string(parameter_list)
+                pods_str = self._get_pod_string(kill_args)
                 _ = re.search(r'%s +\S+ +(\S+)' % host, pods_str).group(1)
             except AttributeError:
                 self.logger.info('Pod %s successfully deleted', host)
                 break  # pod no longer exists
-            self.logger.debug('Waiting for pod deletion for %s. '
+            self.logger.debug('Waiting for pod `%s` to be deleted. '
                               'Sleeping for %s seconds.', host, self.backoff)
             time.sleep(self.backoff)
 
@@ -117,10 +111,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
     def scan_iter(self, match=None):
         while True:
             try:
-                start = timeit.default_timer()
                 response = self.redis_client.scan_iter(match=match)
-                self.logger.debug('Finished SCAN in %s seconds.',
-                                  timeit.default_timer() - start)
                 break
             except redis.exceptions.ConnectionError as err:
                 self.logger.warning('Encountered %s: %s when calling SCAN. '
@@ -170,11 +161,11 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
         if key_status not in {'new', 'done', 'failed'}:
             # is the pod processing this key alive?
-            # TODO: why preprocessing host? why not started?
             host = self.hget(key, 'identity_started')
 
             if not host:
-                self.logger.info('Entry `%s` is malformed. %s', key, self.hgetall(key))
+                self.logger.info('Entry `%s` is malformed. %s',
+                                 key, self.hgetall(key))
                 return False
 
             try:
@@ -234,18 +225,20 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
         # get list of all pods
         pods = self._get_pod_string(['kubectl', 'get', 'pods', '-a'])
-        self.logger.debug('Found pods: %s', pods)
+        self.logger.debug('Found %s pods.', len(pods.splitlines()))
 
         for key in self.scan_iter():
             if self._redis_type(key) == 'hash':
+                self.logger.debug('Triaging key `%s`.', key)
+                start = timeit.default_timer()
                 key_repaired = self.triage(key, pods)
+                self.logger.debug('Triaged key `%s` in %s seconds.',
+                                  key, timeit.default_timer() - start)
                 num_repaired = int(key_repaired)
                 repairs += num_repaired
                 self._repairs += num_repaired
+                if num_repaired:
+                    self.logger.info('Repaired key: `%s`.', key)
 
-        if repairs:
-            self.logger.info('Repaired %s keys.', repairs)
-        else:
-            self.logger.info('No keys currently require repairs.')
-
+        self.logger.info('Repaired %s keys.', repairs)
         self.logger.info('Total keys repaired: %s', self._repairs)
