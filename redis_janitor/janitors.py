@@ -184,7 +184,7 @@ class RedisJanitor(object):
 
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
-            current_time = time.time() * 1000
+            current_time = time.time()
 
             try:
                 last_update = float(self.hget(key, 'timestamp_last_status_update'))

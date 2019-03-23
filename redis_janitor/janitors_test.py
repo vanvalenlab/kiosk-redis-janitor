@@ -96,7 +96,7 @@ class DummyRedis(object):
             raise redis.exceptions.ConnectionError('thrown on purpose')
         if field == 'status':
             return rhash.split('_')[1]
-        elif field == 'identity_preprocessing':
+        elif field == 'identity_started':
             if 'good' in rhash:
                 return 'good_pod'
             elif 'badhost' in rhash:
@@ -106,9 +106,9 @@ class DummyRedis(object):
         elif field == 'timestamp_last_status_update':
             if 'malformed' in rhash:
                 return None
-            if 'good' in rhash:
-                return time.time()
-            return time.time() - 400000
+            if 'stale' in rhash:
+                return time.time() - 400000
+            return time.time()
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
@@ -189,6 +189,7 @@ class TestJanitor(object):
 
         good_pod = 'good_pod status Running'
         bad_pod = 'bad_pod status Failed'
+        good_pod_failed = 'good_pod status Failed'
 
         # test end point statuses
         assert janitor.triage('goodkey_failed', bad_pod) is True
@@ -202,15 +203,15 @@ class TestJanitor(object):
         assert janitor.triage('badkey_inprogress', bad_pod) is True
 
         # test in progress with status != Running
-        assert janitor.triage('goodkey_inprogress', bad_pod) is True
+        assert janitor.triage('goodkey_inprogress', good_pod_failed) is True
 
         # test in progress with status = Running with stale update time
-        assert janitor.triage('badkey_inprogress', good_pod) is True
+        assert janitor.triage('goodkeystale_inprogress', good_pod) is True
 
         # test in progress with status = Running with fresh update time
-        assert janitor.triage('goodkey_inprogress', good_pod) is True
+        assert janitor.triage('goodkey_inprogress', good_pod) is False
 
-        # test in progress with status = Running with fresh update time
+        # test no `timestamp_last_status_update`
         assert janitor.triage('goodmalformed_inprogress', good_pod) is False
 
     def test_triage_keys(self):
