@@ -69,8 +69,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 t = timeit.default_timer()
                 pods_info = subprocess.check_output(args)
                 pods = pods_info.decode('utf8')
-                self.logger.info('Executed subprocess: `%s` in %s seconds.',
-                                 argstring, timeit.default_timer() - t)
+                self.logger.debug('Executed subprocess: `%s` in %s seconds.',
+                                  argstring, timeit.default_timer() - t)
                 break
             except subprocess.CalledProcessError as err:
                 # For some reason, we can't execute this command right now.
@@ -229,7 +229,6 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
         for key in self.scan_iter():
             if self._redis_type(key) == 'hash':
-                start = timeit.default_timer()
                 key_repaired = self.triage(key, pods)
                 num_repaired = int(key_repaired)
                 repairs += num_repaired
@@ -237,5 +236,5 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 if num_repaired:
                     self.logger.info('Repaired key: `%s`.', key)
 
-        self.logger.info('Repaired %s keys.', repairs)
-        self.logger.info('Total keys repaired: %s', self._repairs)
+        self.logger.info('Repaired %s keys (%s total).',
+                         repairs, self._repairs)
