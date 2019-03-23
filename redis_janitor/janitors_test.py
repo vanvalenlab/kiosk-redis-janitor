@@ -142,6 +142,20 @@ class DummyRedis(object):
 
 class TestJanitor(object):
 
+    def test__get_pod_string(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        # TODO: test retries
+        # test that the output was captured
+        s = janitor._get_pod_string(['echo', 'OUTPUT_STRING'])
+        assert s == 'OUTPUT_STRING'
+
+    def test__make_kubectl_call(self):
+        # test that a command will run without error
+        redis_client = DummyRedis(fail_tolerance=2)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor._make_kubectl_call(['echo', 'OUTPUT_STRING'])
+
     def test_hgetall(self):
         redis_client = DummyRedis(fail_tolerance=2)
         janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
