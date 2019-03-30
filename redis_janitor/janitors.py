@@ -92,9 +92,14 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except AttributeError:
                 self.logger.info('Pod %s successfully deleted', host)
                 break  # pod no longer exists
-            self.logger.debug('Waiting for pod `%s` to be deleted. '
-                              'Sleeping for %s seconds.', host, self.backoff)
-            time.sleep(self.backoff)
+            except subprocess.CalledProcessError as err:
+                # For some reason, we can't execute this command right now.
+                # Keep trying until we can.
+                self.logger.warning('Encountered %s: %s while executing with '
+                                    'parameters: %s.  etrying in %s seconds...',
+                                    parameter_list, type(err).__name__, err,
+                                    self.backoff)
+                time.sleep(self.backoff)
 
     def hset(self, rhash, key, value):
         while True:

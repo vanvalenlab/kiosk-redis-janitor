@@ -238,3 +238,22 @@ class TestJanitor(object):
 
         # run triage_keys
         janitor.triage_keys()
+
+#    import subprocess
+#    def test__make_kubectl_call(self):
+#        # since these tests won't be run in a kiosk, kubectl shouldn't be installed,
+#        # which should raise a FileNotFoundError
+#        parameter_list = ["kubectl","get","pods"]
+#        _make_kubectl_call(parameter_list)
+#        
+#        while True:
+#            try:
+#                break
+#            except subprocess.CalledProcessError as err:
+#                # For some reason, we can't execute this command right now.
+#                # Keep trying until we can.
+#                self.logger.warning('Encountered %s: %s while executing with '
+#                                    'parameters: %s. Retrying in %s seconds...',
+#                                    parameter_list, type(err).__name__, err,
+#                                    self.backoff)
+#                time.sleep(self.backoff)
