@@ -245,7 +245,7 @@ class TestJanitor(object):
 #        # which should raise a FileNotFoundError
 #        parameter_list = ["kubectl","get","pods"]
 #        _make_kubectl_call(parameter_list)
-#        
+#
 #        while True:
 #            try:
 #                break
