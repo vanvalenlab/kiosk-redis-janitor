@@ -58,9 +58,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 # For some reason, we can't execute this command right now.
                 # Let's see if we can find out why.
                 error_info = subprocess.check_output(args)
+                self.logger.warning("Error info: %s", error_info)
                 potential_error_string = \
                     "Error from server (NotFound): pods" + \
                     " \"{}\" not found".format(args[-1])
+                self.logger.warning("Potential error string: %s",
+                                    potential_error_string)
                 if error_info == potential_error_string:
                     # We are trying to delete a pod which no longer exists.
                     # Relax, it's ok to exit on an error here.
@@ -68,8 +71,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 else:
                     # Who knows what's going on.
                     # Keep trying until we succeed.
-                    self.logger.warning('Encountered %s: %s while executing `%s`. '
-                                        'Retrying in %s seconds...', argstring,
+                    self.logger.warning('Encountered %s while executing `%s`. '
+                                        'Retrying in %s seconds...',
                                         type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
 
@@ -208,7 +211,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
             try:
                 last_update = float(self.hget(key, 'timestamp_last_status_update'))
-                seconds_since_last_update = (current_time - last_update) / 1000
+                seconds_since_last_update = current_time - (last_update / 1000)
             except TypeError as err:
                 self.logger.info('Key %s with information %s has no '
                                  'appropriate timestamp_last_status_update '
