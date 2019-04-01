@@ -142,12 +142,12 @@ class DummyRedis(object):
 
 class TestJanitor(object):
 
-    def test__get_pod_string(self):
+    def test__get_all_pods(self):
         redis_client = DummyRedis(fail_tolerance=2)
         janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
         # TODO: test retries
         # test that the output was captured
-        s = janitor._get_pod_string(['echo', 'OUTPUT_STRING'])
+        s = janitor._get_all_pods(['echo', 'OUTPUT_STRING'])
         assert s == 'OUTPUT_STRING'
 
     def test__make_kubectl_call(self):
@@ -234,26 +234,20 @@ class TestJanitor(object):
 
         # monkey-patch kubectl commands
         janitor.kill_pod = lambda x: True
-        janitor._get_pod_string = lambda x: 'good_pod status Running'
+        janitor._get_all_pods = lambda: 'good_pod status Running'
+        janitor._make_kubectl_call = lambda x: 0
 
         # run triage_keys
         janitor.triage_keys()
 
-#    import subprocess
-#    def test__make_kubectl_call(self):
-#        # since these tests won't be run in a kiosk, kubectl shouldn't be installed,
-#        # which should raise a FileNotFoundError
-#        parameter_list = ["kubectl","get","pods"]
-#        _make_kubectl_call(parameter_list)
-#
-#        while True:
-#            try:
-#                break
-#            except subprocess.CalledProcessError as err:
-#                # For some reason, we can't execute this command right now.
-#                # Keep trying until we can.
-#                self.logger.warning('Encountered %s: %s while executing with '
-#                                    'parameters: %s. Retrying in %s seconds...',
-#                                    parameter_list, type(err).__name__, err,
-#                                    self.backoff)
-#                time.sleep(self.backoff)
+    def test__make_kubectl_call(self):
+        redis_client = DummyRedis(fail_tolerance=0)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+
+        # since these tests won't be run in a kiosk, kubectl shouldn't be installed,
+        # which should raise a FileNotFoundError
+        parameter_list = ["kubectl","get","pods"]
+        try:
+            janitor._make_kubectl_call(parameter_list)
+        except FileNotFoundError:
+            pass
