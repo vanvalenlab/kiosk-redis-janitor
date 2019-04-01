@@ -47,34 +47,18 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
     def _make_kubectl_call(self, args):
         argstring = ' '.join(args)
-        while True:
-            try:
-                t = timeit.default_timer()
-                subprocess.run(args)
-                self.logger.debug('Executed subprocess: `%s` in %s seconds.',
-                                  argstring, timeit.default_timer() - t)
-                break
-            except subprocess.CalledProcessError as err:
-                # For some reason, we can't execute this command right now.
-                # Let's see if we can find out why.
-                error_info = subprocess.check_output(args)
-                self.logger.warning("Error info: %s", error_info)
-                potential_error_string = \
-                    "Error from server (NotFound): pods" + \
-                    " \"{}\" not found".format(args[-1])
-                self.logger.warning("Potential error string: %s",
-                                    potential_error_string)
-                if error_info == potential_error_string:
-                    # We are trying to delete a pod which no longer exists.
-                    # Relax, it's ok to exit on an error here.
-                    break
-                else:
-                    # Who knows what's going on.
-                    # Keep trying until we succeed.
-                    self.logger.warning('Encountered %s while executing `%s`. '
-                                        'Retrying in %s seconds...',
-                                        type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
+        try:
+            t = timeit.default_timer()
+            subprocess.run(args)
+            self.logger.debug('Executed subprocess: `%s` in %s seconds.',
+                              argstring, timeit.default_timer() - t)
+        except subprocess.CalledProcessError as err:
+            # Who knows what's going on.
+            # Let it go and see if the parent loop brings us back around.
+            self.logger.warning('Encountered %s while executing `%s`. '
+                                'Possibly retrying soon...',
+                                type(err).__name__, err)
+            time.sleep(self.backoff)
 
     def _get_pod_string(self, args):
         argstring = ' '.join(args)
@@ -98,8 +82,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
     def kill_pod(self, host):
         # delete the pod
         kill_args = ['kubectl', 'delete', 'pods', host]
-        self._make_kubectl_call(kill_args)
-        while True:  # wait until it has terminated
+        while True:  # repeat until the pod is gone
+            self._make_kubectl_call(kill_args)
             try:
                 pods_str = self._get_pod_string(kill_args)
                 _ = re.search(r'%s +\S+ +(\S+)' % host, pods_str).group(1)
