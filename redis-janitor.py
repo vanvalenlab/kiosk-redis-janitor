@@ -31,6 +31,7 @@ import os
 import sys
 import time
 import logging
+import traceback
 
 import redis
 
@@ -81,4 +82,5 @@ if __name__ == '__main__':
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
+            print(traceback.format_exc())
             sys.exit(1)
