@@ -95,7 +95,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 # Keep trying until we can.
                 self.logger.warning('Encountered %s: %s while executing with '
                                     'parameters: %s.  etrying in %s seconds...',
-                                    parameter_list, type(err).__name__, err,
+                                    kill_args, type(err).__name__, err,
                                     self.backoff)
                 time.sleep(self.backoff)
 
