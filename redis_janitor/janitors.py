@@ -125,6 +125,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
+            except:
+                # Why didn't we catch this?
+                self.logger.error('Encountered %s: %s when calling HSET. '
+                                    'Retrying in %s seconds.',
+                                    type(err).__name__, err, self.backoff)
+                time.sleep(self.backoff)
         return response
 
     def scan_iter(self, match=None):
@@ -134,6 +140,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 break
             except redis.exceptions.ConnectionError as err:
                 self.logger.warning('Encountered %s: %s when calling SCAN. '
+                                    'Retrying in %s seconds.',
+                                    type(err).__name__, err, self.backoff)
+                time.sleep(self.backoff)
+            except:
+                # Why didn't we catch this?
+                self.logger.error('Encountered %s: %s when calling SCAN. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
@@ -149,6 +161,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
+            except:
+                # Why didn't we catch this?
+                self.logger.error('Encountered %s: %s when calling TYPE. '
+                                    'Retrying in %s seconds.',
+                                    type(err).__name__, err, self.backoff)
+                time.sleep(self.backoff)
         return response
 
     def hget(self, rhash, key):
@@ -161,6 +179,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
+            except:
+                # Why didn't we catch this?
+                self.logger.error('Encountered %s: %s when calling HGET. '
+                                    'Retrying in %s seconds.',
+                                    type(err).__name__, err, self.backoff)
+                time.sleep(self.backoff)
         return response
 
     def hgetall(self, rhash):
@@ -170,6 +194,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 break
             except redis.exceptions.ConnectionError as err:
                 self.logger.warning('Encountered %s: %s when calling HGETALL. '
+                                    'Retrying in %s seconds.',
+                                    type(err).__name__, err, self.backoff)
+                time.sleep(self.backoff)
+            except:
+                # Why didn't we catch this?
+                self.logger.error('Encountered %s: %s when calling HGETALL. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
