@@ -104,7 +104,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             try:
                 response = self.redis_client.hset(rhash, key, value)
                 break
-            except redis.exceptions.ConnectionError as err:
+            except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling HSET. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
@@ -120,7 +120,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             try:
                 response = self.redis_client.scan_iter(match=match)
                 break
-            except redis.exceptions.ConnectionError as err:
+            except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling SCAN. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
@@ -136,7 +136,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             try:
                 response = self.redis_client.type(redis_key)
                 break
-            except redis.exceptions.ConnectionError as err:
+            except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling TYPE. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
@@ -152,7 +152,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             try:
                 response = self.redis_client.hget(rhash, key)
                 break
-            except redis.exceptions.ConnectionError as err:
+            except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling HGET. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
@@ -168,7 +168,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             try:
                 response = self.redis_client.hgetall(rhash)
                 break
-            except redis.exceptions.ConnectionError as err:
+            except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling HGETALL. '
                                     'Retrying in %s seconds.',
                                     type(err).__name__, err, self.backoff)
