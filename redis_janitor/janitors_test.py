@@ -107,8 +107,8 @@ class DummyRedis(object):
             if 'malformed' in rhash:
                 return None
             if 'stale' in rhash:
-                return time.time() - 400000
-            return time.time()
+                return (time.time() - 400000) * 1000
+            return time.time() * 1000
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
