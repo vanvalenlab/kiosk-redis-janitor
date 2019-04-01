@@ -112,8 +112,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except:
                 # Why didn't we catch this?
                 self.logger.error('Encountered %s: %s when calling HSET. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
+                                  'Retrying in %s seconds.',
+                                  type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
         return response
 
@@ -130,8 +130,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except:
                 # Why didn't we catch this?
                 self.logger.error('Encountered %s: %s when calling SCAN. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
+                                  'Retrying in %s seconds.',
+                                  type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
         return response
 
@@ -148,8 +148,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except:
                 # Why didn't we catch this?
                 self.logger.error('Encountered %s: %s when calling TYPE. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
+                                  'Retrying in %s seconds.',
+                                  type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
         return response
 
@@ -166,8 +166,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except:
                 # Why didn't we catch this?
                 self.logger.error('Encountered %s: %s when calling HGET. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
+                                  'Retrying in %s seconds.',
+                                  type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
         return response
 
@@ -184,8 +184,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except:
                 # Why didn't we catch this?
                 self.logger.error('Encountered %s: %s when calling HGETALL. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
+                                  'Retrying in %s seconds.',
+                                  type(err).__name__, err, self.backoff)
                 time.sleep(self.backoff)
         return response
 
