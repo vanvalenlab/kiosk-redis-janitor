@@ -60,7 +60,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                                 type(err).__name__, err)
             time.sleep(self.backoff)
 
-    def _get_pod_string(self, args):
+    def _get_all_pods(self, args=['kubectl', 'get', 'pods', '-a']):
         argstring = ' '.join(args)
         while True:
             try:
@@ -85,19 +85,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         while True:  # repeat until the pod is gone
             self._make_kubectl_call(kill_args)
             try:
-                pods_str = self._get_pod_string(kill_args)
+                pods_str = self._get_all_pods()
                 _ = re.search(r'%s +\S+ +(\S+)' % host, pods_str).group(1)
             except AttributeError:
                 self.logger.info('Pod %s successfully deleted', host)
                 break  # pod no longer exists
-            except subprocess.CalledProcessError as err:
-                # For some reason, we can't execute this command right now.
-                # Keep trying until we can.
-                self.logger.warning('Encountered %s: %s while executing with '
-                                    'parameters: %s.  etrying in %s seconds...',
-                                    kill_args, type(err).__name__, err,
-                                    self.backoff)
-                time.sleep(self.backoff)
+            time.sleep(self.backoff)
 
     def hset(self, rhash, key, value):
         while True:
@@ -248,7 +241,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         repairs = 0
 
         # get list of all pods
-        pods = self._get_pod_string(['kubectl', 'get', 'pods', '-a'])
+        pods = self._get_all_pods()
         self.logger.debug('Found %s pods.', len(pods.splitlines()))
 
         for key in self.scan_iter():
