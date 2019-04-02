@@ -246,7 +246,7 @@ class TestJanitor(object):
 
         # since these tests won't be run in a kiosk, kubectl shouldn't be installed,
         # which should raise a FileNotFoundError
-        parameter_list = ["kubectl","get","pods"]
+        parameter_list = ["kubectl", "get", "pods"]
         try:
             janitor._make_kubectl_call(parameter_list)
         except FileNotFoundError:
