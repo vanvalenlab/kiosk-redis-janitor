@@ -122,6 +122,10 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 self.logger.error('Unexpected %s: %s when calling SCAN.',
                                   type(err).__name__, err)
                 raise err
+            except:
+                self.logger.error('Caught uncatchable exception while calling'
+                                  ' `SCAN`.')
+                raise err
         return response
 
     def _redis_type(self, redis_key):
