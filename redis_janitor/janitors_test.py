@@ -30,10 +30,14 @@ from __future__ import print_function
 
 import time
 
-import numpy as np
 import redis
 
 from redis_janitor import janitors
+
+
+class Bunch(object):
+    def __init__(self, **kwds):
+        self.__dict__.update(kwds)
 
 
 class DummyRedis(object):
@@ -140,25 +144,22 @@ class DummyRedis(object):
         return 'hash'
 
 
+class DummyKubernetes(object):
+
+    def delete_namespaced_pod(self, *args, **kwargs):
+        return True
+
+    def list_pod_for_all_namespaces(self, *args, **kwargs):
+        return Bunch(items=[Bunch(status=Bunch(phase='Running'),
+                                  metadata=Bunch(name='pod'))])
+
+
 class TestJanitor(object):
-
-    def test__get_all_pods(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-        # TODO: test retries
-        # test that the output was captured
-        s = janitor._get_all_pods(['echo', 'OUTPUT_STRING'])
-        assert s == 'OUTPUT_STRING'
-
-    def test__make_kubectl_call(self):
-        # test that a command will run without error
-        redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-        janitor._make_kubectl_call(['echo', 'OUTPUT_STRING'])
 
     def test_hgetall(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
 
         data = janitor.hgetall('redis_hash')
         assert data == redis_client.hgetall('redis_hash')
@@ -166,7 +167,8 @@ class TestJanitor(object):
 
     def test__redis_type(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
 
         data = janitor._redis_type('random_key')
         assert data == redis_client.type('random_key')
@@ -174,13 +176,15 @@ class TestJanitor(object):
 
     def test_hset(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
         janitor.hset('rhash', 'key', 'value')
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
 
     def test_hget(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
         data = janitor.hget('rhash_new', 'status')
         assert data == 'new'
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
@@ -188,49 +192,58 @@ class TestJanitor(object):
     def test_scan_iter(self):
         prefix = 'predict'
         redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
         data = janitor.scan_iter(match=prefix)
         keys = [k for k in data]
         expected = [k for k in redis_client.keys() if k.startswith(prefix)]
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
-        np.testing.assert_array_equal(keys, expected)
+        assert keys == expected
 
     def test_triage(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
 
-        janitor.kill_pod = lambda x: True
+        janitor.kill_pod = lambda x, y: True
 
-        good_pod = 'good_pod status Running'
-        bad_pod = 'bad_pod status Failed'
-        good_pod_failed = 'good_pod status Failed'
+        def pod(key):
+            status = 'Failed' if 'failed' in key else 'Running'
+            name = 'good_pod' if 'good' in key else 'bad_pod'
+            return [Bunch(metadata=Bunch(name=name), status=Bunch(phase=status))]
 
         # test end point statuses
-        assert janitor.triage('goodkey_failed', bad_pod) is True
-        assert janitor.triage('goodkey_new', bad_pod) is False
-        assert janitor.triage('goodkey_done', good_pod) is False
+        assert janitor.triage('goodkey_failed', pod('goodkey_failed')) is True
+        assert janitor.triage('goodkey_new', pod('goodkey_new')) is False
+        assert janitor.triage('goodkey_done', pod('goodkey_done')) is False
 
         # test malformed key (no hostname value)
-        assert janitor.triage('badhost_weirdstatus', bad_pod) is False
+        assert janitor.triage('badhost_weirdstatus',
+                              pod('badhost_weirdstatus')) is False
 
         # test pod not found
-        assert janitor.triage('badkey_inprogress', bad_pod) is True
+        assert janitor.triage('badkey_inprogress', []) is True
 
         # test in progress with status != Running
-        assert janitor.triage('goodkey_inprogress', good_pod_failed) is True
+        pods = [Bunch(metadata=Bunch(name='good_pod'), status=Bunch(phase='Failed'))]
+        assert janitor.triage('goodkey_inprogress', pods) is True
 
         # test in progress with status = Running with stale update time
-        assert janitor.triage('goodkeystale_inprogress', good_pod) is True
+        assert janitor.triage('goodkeystale_inprogress',
+                              pod('goodkeystale_inprogress')) is True
 
         # test in progress with status = Running with fresh update time
-        assert janitor.triage('goodkey_inprogress', good_pod) is False
+        assert janitor.triage('goodkey_inprogress',
+                              pod('goodkey_inprogress')) is False
 
         # test no `timestamp_last_status_update`
-        assert janitor.triage('goodmalformed_inprogress', good_pod) is False
+        assert janitor.triage('goodmalformed_inprogress',
+                              pod('goodmalformed_inprogress')) is False
 
     def test_triage_keys(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        kube_client = DummyKubernetes()
+        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
 
         # monkey-patch kubectl commands
         janitor.kill_pod = lambda x: True
@@ -239,15 +252,3 @@ class TestJanitor(object):
 
         # run triage_keys
         janitor.triage_keys()
-
-    def test__make_kubectl_call(self):
-        redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-
-        # since these tests won't be run in a kiosk, kubectl shouldn't be installed,
-        # which should raise a FileNotFoundError
-        parameter_list = ["kubectl", "get", "pods"]
-        try:
-            janitor._make_kubectl_call(parameter_list)
-        except FileNotFoundError:
-            pass
