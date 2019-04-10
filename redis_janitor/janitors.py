@@ -29,6 +29,7 @@ from __future__ import division
 from __future__ import print_function
 
 import time
+import timeit
 import logging
 
 import redis
@@ -46,6 +47,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
     def kill_pod(self, pod_name, namespace):
         # delete the pod
+        t = timeit.default_timer()
         try:
             response = self.kube_client.delete_namespaced_pod(
                 pod_name, namespace, grace_period_seconds=0)
@@ -54,9 +56,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                                 '`delete_namespaced_pod`. ',
                                 type(err).__name__, err)
             raise err
+        self.logger.debug('Killed pod `%s` in namespace `%s` in %s seconds.',
+                          pod_name, namespace, timeit.default_timer() - t)
         return response
 
     def list_pod_for_all_namespaces(self):
+        t = timeit.default_timer()
         try:
             response = self.kube_client.list_pod_for_all_namespaces()
         except kubernetes.client.rest.ApiException as err:
@@ -64,6 +69,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                               '`list_pod_for_all_namespaces`. ',
                               type(err).__name__, err)
             raise err
+        self.logger.debug('Found %s pods in %s seconds.',
+                          len(response.items), timeit.default_timer() - t)
         return response.items
 
     def hset(self, rhash, key, value):
