@@ -31,6 +31,7 @@ import os
 import sys
 import time
 import logging
+import logging.handlers
 
 import redis
 
@@ -45,7 +46,10 @@ def initialize_logger(debug_mode=False):
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
-    fh = logging.FileHandler('redis-janitor.log')
+    fh = logging.handlers.RotatingFileHandler(
+        filename='redis-janitor.log',
+        maxBytes=10000000,
+        backupCount=10)
     fh.setFormatter(formatter)
 
     if debug_mode:
