@@ -31,14 +31,16 @@ import os
 import sys
 import time
 import logging
+import traceback
 import logging.handlers
 
 import redis
+import kubernetes
 
 from redis_janitor import RedisJanitor
 
 
-def initialize_logger(debug_mode=False):
+def initialize_logger(debug_mode=True):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
@@ -54,19 +56,19 @@ def initialize_logger(debug_mode=False):
 
     if debug_mode:
         console.setLevel(logging.DEBUG)
-        fh.setLevel(logging.DEBUG)
     else:
         console.setLevel(logging.INFO)
-        fh.setLevel(logging.INFO)
+    fh.setLevel(logging.DEBUG)
 
     logger.addHandler(console)
     logger.addHandler(fh)
+    logging.getLogger('kubernetes.client.rest').setLevel(logging.INFO)
 
 
 if __name__ == '__main__':
     INTERVAL = int(os.getenv('INTERVAL', '20'))
 
-    initialize_logger(debug_mode=True)
+    initialize_logger(os.getenv('DEBUG'))
 
     _logger = logging.getLogger(__file__)
 
@@ -76,7 +78,12 @@ if __name__ == '__main__':
         decode_responses=True,
         charset='utf-8')
 
-    janitor = RedisJanitor(redis_client=REDIS)
+    kubernetes.config.load_incluster_config()
+
+    KUBE = kubernetes.client.CoreV1Api(
+        kubernetes.client.ApiClient())
+
+    janitor = RedisJanitor(redis_client=REDIS, kube_client=KUBE)
 
     while True:
         try:
@@ -85,4 +92,5 @@ if __name__ == '__main__':
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
+            _logger.critical(traceback.format_exc())
             sys.exit(1)
