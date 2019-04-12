@@ -89,10 +89,10 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 raise err
         return response
 
-    def scan_iter(self, match=None):
+    def scan_iter(self, match=None, count=None):
         while True:
             try:
-                response = self.redis_client.scan_iter(match=match)
+                response = self.redis_client.scan_iter(match=match, count=count)
                 break
             except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling SCAN. '
@@ -225,7 +225,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         pods = self.list_pod_for_all_namespaces()
         self.logger.info('Found %s pods.', len(pods))
 
-        for key in self.scan_iter():
+        for key in self.scan_iter(count=1000):
             if self._redis_type(key) == 'hash':
                 key_repaired = self.triage(key, pods)
                 num_repaired = int(key_repaired)
