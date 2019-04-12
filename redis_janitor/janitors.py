@@ -28,69 +28,50 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import re
 import time
 import timeit
 import logging
-import subprocess
 
 import redis
+import kubernetes.client
 
 
 class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
-    def __init__(self, redis_client, backoff=3):
+    def __init__(self, redis_client, kube_client, backoff=3):
         self.redis_client = redis_client
+        self.kube_client = kube_client
         self._repairs = 0
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
 
-    def _make_kubectl_call(self, args):
-        argstring = ' '.join(args)
-        try:
-            t = timeit.default_timer()
-            subprocess.run(args)
-            self.logger.debug('Executed subprocess: `%s` in %s seconds.',
-                              argstring, timeit.default_timer() - t)
-        except subprocess.CalledProcessError as err:
-            # Who knows what's going on.
-            # Let it go and see if the parent loop brings us back around.
-            self.logger.warning('Encountered %s while executing `%s`. '
-                                'Possibly retrying soon...',
-                                type(err).__name__, err)
-            time.sleep(self.backoff)
-
-    def _get_all_pods(self, args=['kubectl', 'get', 'pods', '-a']):
-        argstring = ' '.join(args)
-        while True:
-            try:
-                t = timeit.default_timer()
-                pods_info = subprocess.check_output(args)
-                pods = pods_info.decode('utf8')
-                self.logger.debug('Executed subprocess: `%s` in %s seconds.',
-                                  argstring, timeit.default_timer() - t)
-                break
-            except subprocess.CalledProcessError as err:
-                # For some reason, we can't execute this command right now.
-                # Keep trying until we can.
-                self.logger.warning('Encountered %s: %s while executing `%s`. '
-                                    'Retrying in %s seconds...', argstring,
-                                    type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
-        return '\n'.join(x for x in pods.splitlines() if x)
-
-    def kill_pod(self, host):
+    def kill_pod(self, pod_name, namespace):
         # delete the pod
-        kill_args = ['kubectl', 'delete', 'pods', host]
-        while True:  # repeat until the pod is gone
-            self._make_kubectl_call(kill_args)
-            try:
-                pods_str = self._get_all_pods()
-                _ = re.search(r'%s +\S+ +(\S+)' % host, pods_str).group(1)
-            except AttributeError:
-                self.logger.info('Pod %s successfully deleted', host)
-                break  # pod no longer exists
-            time.sleep(self.backoff)
+        t = timeit.default_timer()
+        try:
+            response = self.kube_client.delete_namespaced_pod(
+                pod_name, namespace, grace_period_seconds=0)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.warning('Encountered %s: %s when calling '
+                                '`delete_namespaced_pod`. ',
+                                type(err).__name__, err)
+            raise err
+        self.logger.debug('Killed pod `%s` in namespace `%s` in %s seconds.',
+                          pod_name, namespace, timeit.default_timer() - t)
+        return response
+
+    def list_pod_for_all_namespaces(self):
+        t = timeit.default_timer()
+        try:
+            response = self.kube_client.list_pod_for_all_namespaces()
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.error('Encountered %s: %s when calling '
+                              '`list_pod_for_all_namespaces`. ',
+                              type(err).__name__, err)
+            raise err
+        self.logger.debug('Found %s pods in %s seconds.',
+                          len(response.items), timeit.default_timer() - t)
+        return response.items
 
     def hset(self, rhash, key, value):
         while True:
@@ -121,10 +102,6 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             except Exception as err:
                 self.logger.error('Unexpected %s: %s when calling SCAN.',
                                   type(err).__name__, err)
-                raise err
-            except:
-                self.logger.error('Caught uncatchable exception while calling'
-                                  ' `SCAN`.')
                 raise err
         return response
 
@@ -177,7 +154,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 raise err
         return response
 
-    def triage(self, key, pods):
+    def triage(self, key, all_pods):
         key_status = self.hget(key, 'status')
 
         if key_status not in {'new', 'done', 'failed'}:
@@ -185,25 +162,25 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
             host = self.hget(key, 'identity_started')
 
             if not host:
-                self.logger.info('Entry `%s` is malformed. %s',
-                                 key, self.hgetall(key))
+                self.logger.warning('Entry `%s` is malformed. %s',
+                                    key, self.hgetall(key))
                 return False
 
             try:
-                pod_status = re.search(r'%s +\S+ +(\S+)' % host, pods).group(1)
-            except AttributeError:  # pod not found, reset the status
+                pod = [p for p in all_pods if p.metadata.name == host][0]
+            except IndexError:
                 self.logger.info('Pod %s is AWOL. Resetting record %s.', host, key)
                 self.hset(key, 'status', 'new')
                 return True
 
             # the pod's still around, but is something wrong with it?
-            if pod_status != 'Running':
+            if pod.status.phase != 'Running':
                 # we need to make sure it gets killed
                 # and then reset the status of the job
                 self.logger.info('Pod %s is in status `%s`.  Killing it '
                                  'and then resetting record %s.',
-                                 host, pod_status, key)
-                self.kill_pod(host)
+                                 host, pod.status.phase, key)
+                self.kill_pod(host, 'deepcell')  # TODO: hardcoded namespace
                 self.hset(key, 'status', 'new')
                 return True
 
@@ -245,8 +222,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         repairs = 0
 
         # get list of all pods
-        pods = self._get_all_pods()
-        self.logger.debug('Found %s pods.', len(pods.splitlines()))
+        pods = self.list_pod_for_all_namespaces()
+        self.logger.info('Found %s pods.', len(pods))
 
         for key in self.scan_iter():
             if self._redis_type(key) == 'hash':
