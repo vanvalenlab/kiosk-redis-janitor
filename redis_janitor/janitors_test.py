@@ -265,7 +265,6 @@ class TestJanitor(object):
         items = janitor.list_pod_for_all_namespaces()
         assert items == []
 
-
     def test_triage(self):
         redis_client = DummyRedis(fail_tolerance=0)
         janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
