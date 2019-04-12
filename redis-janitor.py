@@ -32,6 +32,7 @@ import sys
 import time
 import logging
 import traceback
+import logging.handlers
 
 import redis
 import kubernetes
@@ -47,7 +48,10 @@ def initialize_logger(debug_mode=True):
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
-    fh = logging.FileHandler('redis-janitor.log')
+    fh = logging.handlers.RotatingFileHandler(
+        filename='redis-janitor.log',
+        maxBytes=10000000,
+        backupCount=10)
     fh.setFormatter(formatter)
 
     if debug_mode:
@@ -88,5 +92,5 @@ if __name__ == '__main__':
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
-            print(traceback.format_exc())
+            _logger.critical(traceback.format_exc())
             sys.exit(1)
