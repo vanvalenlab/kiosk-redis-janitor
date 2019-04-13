@@ -30,7 +30,10 @@ from __future__ import print_function
 
 import time
 
+import pytest
+
 import redis
+import kubernetes
 
 from redis_janitor import janitors
 
@@ -41,7 +44,9 @@ class Bunch(object):
 
 
 class DummyRedis(object):
-    def __init__(self, prefix='predict', status='new', fail_tolerance=0):
+    def __init__(self, prefix='predict', status='new',
+                 fail_tolerance=0, hard_fail=False):
+        self.hard_fail = hard_fail
         self.fail_count = 0
         self.fail_tolerance = fail_tolerance
         self.prefix = '/'.join(x for x in prefix.split('/') if x)
@@ -60,7 +65,9 @@ class DummyRedis(object):
             '{}_{}_{}'.format('other', self.status, 'x.zip'),
         ]
 
-    def scan_iter(self, match=None):
+    def scan_iter(self, match=None, count=None):
+        if self.hard_fail:
+            raise Exception('thrown on purpose')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
@@ -89,12 +96,16 @@ class DummyRedis(object):
                         yield k
 
     def hmset(self, rhash, hvals):  # pylint: disable=W0613
+        if self.hard_fail:
+            raise Exception('thrown on purpose')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
         return hvals
 
     def hget(self, rhash, field):
+        if self.hard_fail:
+            raise Exception('thrown on purpose')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
@@ -116,12 +127,16 @@ class DummyRedis(object):
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
+        if self.hard_fail:
+            raise Exception('thrown on purpose')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
         return {status: value}
 
     def hgetall(self, rhash):  # pylint: disable=W0613
+        if self.hard_fail:
+            raise Exception('thrown on purpose')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
@@ -138,6 +153,8 @@ class DummyRedis(object):
         }
 
     def type(self, key):  # pylint: disable=W0613
+        if self.hard_fail:
+            raise Exception('thrown on purpose')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
@@ -146,10 +163,17 @@ class DummyRedis(object):
 
 class DummyKubernetes(object):
 
-    def delete_namespaced_pod(self, *args, **kwargs):
+    def __init__(self, fail=False):
+        self.fail = fail
+
+    def delete_namespaced_pod(self, pod_name, _, **kwargs):
+        if pod_name == 'fail':
+            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return True
 
     def list_pod_for_all_namespaces(self, *args, **kwargs):
+        if self.fail:
+            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(status=Bunch(phase='Running'),
                                   metadata=Bunch(name='pod'))])
 
@@ -158,52 +182,92 @@ class TestJanitor(object):
 
     def test_hgetall(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
 
         data = janitor.hgetall('redis_hash')
         assert data == redis_client.hgetall('redis_hash')
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
 
+        with pytest.raises(Exception):
+            redis_client = DummyRedis(hard_fail=True)
+            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+            janitor.hgetall('redis_hash')
+
     def test__redis_type(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
 
         data = janitor._redis_type('random_key')
         assert data == redis_client.type('random_key')
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
 
+        with pytest.raises(Exception):
+            redis_client = DummyRedis(hard_fail=True)
+            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+            janitor._redis_type('random_key')
+
     def test_hset(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
         janitor.hset('rhash', 'key', 'value')
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
 
+        with pytest.raises(Exception):
+            redis_client = DummyRedis(hard_fail=True)
+            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+            janitor.hset('rhash', 'key', 'value')
+
     def test_hget(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
         data = janitor.hget('rhash_new', 'status')
         assert data == 'new'
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
 
+        with pytest.raises(Exception):
+            redis_client = DummyRedis(hard_fail=True)
+            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+            janitor.hget('rhash_new', 'status')
+
     def test_scan_iter(self):
         prefix = 'predict'
         redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
         data = janitor.scan_iter(match=prefix)
         keys = [k for k in data]
         expected = [k for k in redis_client.keys() if k.startswith(prefix)]
         assert janitor.redis_client.fail_count == redis_client.fail_tolerance
         assert keys == expected
 
+        with pytest.raises(Exception):
+            redis_client = DummyRedis(hard_fail=True)
+            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+            janitor.scan_iter(match=prefix)
+
+    def test_kill_pod(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor.get_core_v1_client = DummyKubernetes
+
+        assert janitor.kill_pod('pass', 'ns') is True
+        assert janitor.kill_pod('fail', 'ns') is False
+
+    def test_list_pod_for_all_namespaces(self):
+        redis_client = DummyRedis(fail_tolerance=2)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor.get_core_v1_client = DummyKubernetes
+
+        items = janitor.list_pod_for_all_namespaces()
+        assert len(items) == 1 and items[0].metadata.name == 'pod'
+
+        janitor.get_core_v1_client = lambda: DummyKubernetes(fail=True)
+
+        items = janitor.list_pod_for_all_namespaces()
+        assert items == []
+
     def test_triage(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
 
         janitor.kill_pod = lambda x, y: True
 
@@ -242,8 +306,8 @@ class TestJanitor(object):
 
     def test_triage_keys(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        kube_client = DummyKubernetes()
-        janitor = janitors.RedisJanitor(redis_client, kube_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor.get_core_v1_client = DummyKubernetes
 
         # monkey-patch kubectl commands
         janitor.kill_pod = lambda x: True

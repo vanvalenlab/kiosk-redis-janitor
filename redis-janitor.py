@@ -37,7 +37,7 @@ import logging.handlers
 import redis
 import kubernetes
 
-from redis_janitor import RedisJanitor
+import redis_janitor
 
 
 def initialize_logger(debug_mode=True):
@@ -78,12 +78,7 @@ if __name__ == '__main__':
         decode_responses=True,
         charset='utf-8')
 
-    kubernetes.config.load_incluster_config()
-
-    KUBE = kubernetes.client.CoreV1Api(
-        kubernetes.client.ApiClient())
-
-    janitor = RedisJanitor(redis_client=REDIS, kube_client=KUBE)
+    janitor = redis_janitor.RedisJanitor(redis_client=REDIS)
 
     while True:
         try:

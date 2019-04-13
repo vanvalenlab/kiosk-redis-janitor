@@ -38,24 +38,32 @@ import kubernetes.client
 
 class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
-    def __init__(self, redis_client, kube_client, backoff=3):
+    def __init__(self, redis_client, backoff=3):
         self.redis_client = redis_client
-        self.kube_client = kube_client
         self._repairs = 0
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
+
+    def get_core_v1_client(self):
+        """Returns Kubernetes API Client for CoreV1Api"""
+        t = timeit.default_timer()
+        kubernetes.config.load_incluster_config()
+        kube_client = kubernetes.client.CoreV1Api()
+        self.logger.debug('Created CoreV1Api client in %s seconds.',
+                          timeit.default_timer() - t)
+        return kube_client
 
     def kill_pod(self, pod_name, namespace):
         # delete the pod
         t = timeit.default_timer()
         try:
-            response = self.kube_client.delete_namespaced_pod(
+            kube_client = self.get_core_v1_client()
+            response = kube_client.delete_namespaced_pod(
                 pod_name, namespace, grace_period_seconds=0)
         except kubernetes.client.rest.ApiException as err:
-            self.logger.warning('Encountered %s: %s when calling '
-                                '`delete_namespaced_pod`. ',
-                                type(err).__name__, err)
-            raise err
+            self.logger.error('`delete_namespaced_pod` encountered %s: %s.',
+                              type(err).__name__, err)
+            return False
         self.logger.debug('Killed pod `%s` in namespace `%s` in %s seconds.',
                           pod_name, namespace, timeit.default_timer() - t)
         return response
@@ -63,12 +71,12 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
     def list_pod_for_all_namespaces(self):
         t = timeit.default_timer()
         try:
-            response = self.kube_client.list_pod_for_all_namespaces()
+            kube_client = self.get_core_v1_client()
+            response = kube_client.list_pod_for_all_namespaces()
         except kubernetes.client.rest.ApiException as err:
-            self.logger.error('Encountered %s: %s when calling '
-                              '`list_pod_for_all_namespaces`. ',
-                              type(err).__name__, err)
-            raise err
+            self.logger.error('`list_pod_for_all_namespaces` encountered '
+                              '%s: %s.', type(err).__name__, err)
+            return []
         self.logger.debug('Found %s pods in %s seconds.',
                           len(response.items), timeit.default_timer() - t)
         return response.items
@@ -89,10 +97,10 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 raise err
         return response
 
-    def scan_iter(self, match=None):
+    def scan_iter(self, match=None, count=None):
         while True:
             try:
-                response = self.redis_client.scan_iter(match=match)
+                response = self.redis_client.scan_iter(match=match, count=count)
                 break
             except (ConnectionError, redis.exceptions.ConnectionError) as err:
                 self.logger.warning('Encountered %s: %s when calling SCAN. '
@@ -225,7 +233,7 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         pods = self.list_pod_for_all_namespaces()
         self.logger.info('Found %s pods.', len(pods))
 
-        for key in self.scan_iter():
+        for key in self.scan_iter(count=1000):
             if self._redis_type(key) == 'hash':
                 key_repaired = self.triage(key, pods)
                 num_repaired = int(key_repaired)
