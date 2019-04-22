@@ -86,7 +86,7 @@ class DummyRedis(object):
                 return None
             else:
                 return 'bad_pod'
-        elif field == 'last_updated':
+        elif field == 'updated_at':
             if 'malformed' in rhash:
                 return None
             now = datetime.datetime.now(datetime.timezone.utc)
@@ -193,7 +193,7 @@ class TestJanitor(object):
         assert janitor.triage('goodkey_inprogress',
                               pod('goodkey_inprogress')) is False
 
-        # test no `last_updated`
+        # test no `updated_at`
         assert janitor.triage('goodmalformed_inprogress',
                               pod('goodmalformed_inprogress')) is False
 

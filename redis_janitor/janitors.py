@@ -113,18 +113,18 @@ class RedisJanitor(object):
                 fmt = '%b %d, %Y %H:%M:%S.%f'
                 current_time = datetime.datetime.now(datetime.timezone.utc)
                 current_time = current_time.strftime(fmt)
-                updated_time = self.redis_client.hget(key, 'last_updated')
+                updated_time = self.redis_client.hget(key, 'updated_at')
                 parse = lambda x: datetime.datetime.strptime(x, fmt)
                 update_diff = parse(current_time) - parse(updated_time)
             except (TypeError, ValueError) as err:
                 self.logger.info('Key %s with information %s has no '
-                                 'appropriate `last_updated` '
+                                 'appropriate `updated_at` '
                                  'field. %s: %s', key,
                                  self.redis_client.hgetall(key),
                                  type(err).__name__, err)
                 return False
 
-            if update_diff.seconds >= timeout_seconds:
+            if update_diff.total_seconds() >= timeout_seconds:
                 # This entry has not been updated in at least `timeout_seconds`
                 # Assume it has died, and reset the status
                 self.logger.info('Key `%s` has not been updated in %s seconds.'
