@@ -35,7 +35,7 @@ import logging
 import kubernetes.client
 
 
-class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
+class RedisJanitor(object):
 
     def __init__(self, redis_client, backoff=3):
         self.redis_client = redis_client

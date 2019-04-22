@@ -35,12 +35,12 @@ import kubernetes
 from redis_janitor import janitors
 
 
-class Bunch(object):  # pylint: disable=useless-object-inheritance
+class Bunch(object):
     def __init__(self, **kwds):
         self.__dict__.update(kwds)
 
 
-class DummyRedis(object):  # pylint: disable=useless-object-inheritance
+class DummyRedis(object):
     def __init__(self, prefix='predict', status='new',
                  fail_tolerance=0, hard_fail=False):
         self.hard_fail = hard_fail
@@ -117,7 +117,7 @@ class DummyRedis(object):  # pylint: disable=useless-object-inheritance
         return 'hash'
 
 
-class DummyKubernetes(object):  # pylint: disable=useless-object-inheritance
+class DummyKubernetes(object):
 
     def __init__(self, fail=False):
         self.fail = fail
@@ -134,7 +134,7 @@ class DummyKubernetes(object):  # pylint: disable=useless-object-inheritance
                                   metadata=Bunch(name='pod'))])
 
 
-class TestJanitor(object):  # pylint: disable=useless-object-inheritance
+class TestJanitor(object):
 
     def test_kill_pod(self):
         redis_client = DummyRedis(fail_tolerance=2)
