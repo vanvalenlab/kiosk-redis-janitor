@@ -167,10 +167,8 @@ class TestJanitor(object):
         def pod(key):
             status = 'Failed' if 'failed' in key else 'Running'
             name = 'good_pod' if 'good' in key else 'bad_pod'
-            return [
-                Bunch(metadata=Bunch(name=name),
-                status=Bunch(phase=status))
-            ]
+            return [Bunch(metadata=Bunch(name=name),
+                          status=Bunch(phase=status))]
 
         # test end point statuses
         assert janitor.triage('goodkey_failed', pod('goodkey_failed')) is True
@@ -185,10 +183,8 @@ class TestJanitor(object):
         assert janitor.triage('badkey_inprogress', []) is True
 
         # test in progress with status != Running
-        pods = [
-            Bunch(metadata=Bunch(name='good_pod'),
-            status=Bunch(phase='Failed'))
-        ]
+        pods = [Bunch(metadata=Bunch(name='good_pod'),
+                      status=Bunch(phase='Failed'))]
         assert janitor.triage('goodkey_inprogress', pods) is True
 
         # test in progress with status = Running with stale update time
