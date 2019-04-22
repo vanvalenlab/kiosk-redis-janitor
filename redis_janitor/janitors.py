@@ -92,7 +92,8 @@ class RedisJanitor(object):
             try:
                 pod = [p for p in all_pods if p.metadata.name == host][0]
             except IndexError:
-                self.logger.info('Pod %s is AWOL. Resetting record %s.', host, key)
+                self.logger.info('Pod %s not found. Resetting record `%s`.',
+                                 host, key)
                 self.redis_client.hset(key, 'status', 'new')
                 return True
 
