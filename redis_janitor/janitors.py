@@ -45,11 +45,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
     def get_core_v1_client(self):
         """Returns Kubernetes API Client for CoreV1Api"""
-        t = timeit.default_timer()
         kubernetes.config.load_incluster_config()
         kube_client = kubernetes.client.CoreV1Api()
-        self.logger.debug('Created CoreV1Api client in %s seconds.',
-                          timeit.default_timer() - t)
         return kube_client
 
     def kill_pod(self, pod_name, namespace):
