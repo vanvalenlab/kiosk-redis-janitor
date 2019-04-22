@@ -28,22 +28,19 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import time
+import datetime
 
-import pytest
-
-import redis
 import kubernetes
 
 from redis_janitor import janitors
 
 
-class Bunch(object):
+class Bunch(object):  # pylint: disable=useless-object-inheritance
     def __init__(self, **kwds):
         self.__dict__.update(kwds)
 
 
-class DummyRedis(object):
+class DummyRedis(object):  # pylint: disable=useless-object-inheritance
     def __init__(self, prefix='predict', status='new',
                  fail_tolerance=0, hard_fail=False):
         self.hard_fail = hard_fail
@@ -89,12 +86,15 @@ class DummyRedis(object):
                 return None
             else:
                 return 'bad_pod'
-        elif field == 'timestamp_last_status_update':
+        elif field == 'last_updated':
             if 'malformed' in rhash:
                 return None
+            now = datetime.datetime.now(datetime.timezone.utc)
             if 'stale' in rhash:
-                return (time.time() - 400000) * 1000
-            return time.time() * 1000
+                return datetime.datetime.strftime(
+                    now - datetime.timedelta(hours=1), '%b %d, %Y %H:%M:%S.%f')
+            return datetime.datetime.strftime(
+                now - datetime.timedelta(minutes=1), '%b %d, %Y %H:%M:%S.%f')
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
@@ -117,31 +117,32 @@ class DummyRedis(object):
         return 'hash'
 
 
-class DummyKubernetes(object):
+class DummyKubernetes(object):  # pylint: disable=useless-object-inheritance
 
     def __init__(self, fail=False):
         self.fail = fail
 
-    def delete_namespaced_pod(self, pod_name, _, **kwargs):
-        if pod_name == 'fail':
+    def delete_namespaced_pod(self, *_, **__):
+        if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return True
 
-    def list_pod_for_all_namespaces(self, *args, **kwargs):
+    def list_pod_for_all_namespaces(self, *_, **__):
         if self.fail:
             raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(status=Bunch(phase='Running'),
                                   metadata=Bunch(name='pod'))])
 
 
-class TestJanitor(object):
+class TestJanitor(object):  # pylint: disable=useless-object-inheritance
 
     def test_kill_pod(self):
         redis_client = DummyRedis(fail_tolerance=2)
         janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
         janitor.get_core_v1_client = DummyKubernetes
-
         assert janitor.kill_pod('pass', 'ns') is True
+
+        janitor.get_core_v1_client = lambda: DummyKubernetes(fail=True)
         assert janitor.kill_pod('fail', 'ns') is False
 
     def test_list_pod_for_all_namespaces(self):
@@ -159,7 +160,7 @@ class TestJanitor(object):
 
     def test_triage(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, backoff=0)
 
         janitor.kill_pod = lambda x, y: True
 
@@ -192,7 +193,7 @@ class TestJanitor(object):
         assert janitor.triage('goodkey_inprogress',
                               pod('goodkey_inprogress')) is False
 
-        # test no `timestamp_last_status_update`
+        # test no `last_updated`
         assert janitor.triage('goodmalformed_inprogress',
                               pod('goodmalformed_inprogress')) is False
 

@@ -28,8 +28,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import time
 import timeit
+import datetime
 import logging
 
 import kubernetes.client
@@ -109,29 +109,32 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
 
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
-            current_time = time.time()
-
             try:
-                last_update = float(self.redis_client.hget(key, 'last_updated'))
-                seconds_since_last_update = current_time - (last_update / 1000)
-            except TypeError as err:
+                fmt = '%b %d, %Y %H:%M:%S.%f'
+                current_time = datetime.datetime.now(datetime.timezone.utc)
+                current_time = current_time.strftime(fmt)
+                updated_time = self.redis_client.hget(key, 'last_updated')
+                parse = lambda x: datetime.datetime.strptime(x, fmt)
+                update_diff = parse(current_time) - parse(updated_time)
+            except (TypeError, ValueError) as err:
                 self.logger.info('Key %s with information %s has no '
-                                 'appropriate timestamp_last_status_update '
-                                 'field. %s: %s', key, self.redis_client.hgetall(key),
+                                 'appropriate `last_updated` '
+                                 'field. %s: %s', key,
+                                 self.redis_client.hgetall(key),
                                  type(err).__name__, err)
                 return False
 
-            if seconds_since_last_update >= timeout_seconds:
+            if update_diff.seconds >= timeout_seconds:
                 # This entry has not been updated in at least `timeout_seconds`
                 # Assume it has died, and reset the status
                 self.logger.info('Key `%s` has not been updated in %s seconds.'
                                  ' Resetting its status now.',
-                                 key, seconds_since_last_update)
+                                 key, update_diff)
                 self.redis_client.hset(key, 'status', 'new')
                 return True
 
         elif key_status == 'failed':  # TODO: should we restart all failures?
-            # key failed, so try it again
+            # key failed, so reset it
             failure_reason = self.redis_client.hget(key, 'reason')
             self.logger.info('Key %s failed due to "%s". Resetting its '
                              'status now.', key, failure_reason)
