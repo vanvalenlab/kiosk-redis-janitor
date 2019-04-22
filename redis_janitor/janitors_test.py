@@ -51,12 +51,7 @@ class DummyRedis(object):
         self.fail_tolerance = fail_tolerance
         self.prefix = '/'.join(x for x in prefix.split('/') if x)
         self.status = status
-
-    def keys(self):
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
-        return [
+        self.keys = [
             '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
             '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
             '{}_{}_{}'.format('other', self.status, 'x.TIFF'),
@@ -66,26 +61,12 @@ class DummyRedis(object):
         ]
 
     def scan_iter(self, match=None, count=None):
-        if self.hard_fail:
-            raise Exception('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
-
-        keys = [
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
-            '{}_{}_{}'.format('other', self.status, 'x.TIFF'),
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.tiff'),
-            '{}_{}_{}'.format('other', self.status, 'x.zip'),
-        ]
         if match:
-            return (k for k in keys if k.startswith(match[:-1]))
-        return (k for k in keys)
+            return (k for k in self.keys if k.startswith(match[:-1]))
+        return (k for k in self.keys)
 
     def expected_keys(self, suffix=None):
-        for k in self.keys():
+        for k in self.keys:
             v = k.split('_')
             if v[0] == self.prefix:
                 if v[1] == self.status:
@@ -96,19 +77,9 @@ class DummyRedis(object):
                         yield k
 
     def hmset(self, rhash, hvals):  # pylint: disable=W0613
-        if self.hard_fail:
-            raise Exception('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         return hvals
 
     def hget(self, rhash, field):
-        if self.hard_fail:
-            raise Exception('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         if field == 'status':
             return rhash.split('_')[1]
         elif field == 'identity_started':
@@ -127,19 +98,9 @@ class DummyRedis(object):
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
-        if self.hard_fail:
-            raise Exception('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         return {status: value}
 
     def hgetall(self, rhash):  # pylint: disable=W0613
-        if self.hard_fail:
-            raise Exception('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         return {
             'model_name': 'model',
             'model_version': '0',
@@ -153,11 +114,6 @@ class DummyRedis(object):
         }
 
     def type(self, key):  # pylint: disable=W0613
-        if self.hard_fail:
-            raise Exception('thrown on purpose')
-        if self.fail_count < self.fail_tolerance:
-            self.fail_count += 1
-            raise redis.exceptions.ConnectionError('thrown on purpose')
         return 'hash'
 
 
@@ -179,70 +135,6 @@ class DummyKubernetes(object):
 
 
 class TestJanitor(object):
-
-    def test_hgetall(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-
-        data = janitor.hgetall('redis_hash')
-        assert data == redis_client.hgetall('redis_hash')
-        assert janitor.redis_client.fail_count == redis_client.fail_tolerance
-
-        with pytest.raises(Exception):
-            redis_client = DummyRedis(hard_fail=True)
-            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-            janitor.hgetall('redis_hash')
-
-    def test__redis_type(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-
-        data = janitor._redis_type('random_key')
-        assert data == redis_client.type('random_key')
-        assert janitor.redis_client.fail_count == redis_client.fail_tolerance
-
-        with pytest.raises(Exception):
-            redis_client = DummyRedis(hard_fail=True)
-            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-            janitor._redis_type('random_key')
-
-    def test_hset(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-        janitor.hset('rhash', 'key', 'value')
-        assert janitor.redis_client.fail_count == redis_client.fail_tolerance
-
-        with pytest.raises(Exception):
-            redis_client = DummyRedis(hard_fail=True)
-            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-            janitor.hset('rhash', 'key', 'value')
-
-    def test_hget(self):
-        redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-        data = janitor.hget('rhash_new', 'status')
-        assert data == 'new'
-        assert janitor.redis_client.fail_count == redis_client.fail_tolerance
-
-        with pytest.raises(Exception):
-            redis_client = DummyRedis(hard_fail=True)
-            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-            janitor.hget('rhash_new', 'status')
-
-    def test_scan_iter(self):
-        prefix = 'predict'
-        redis_client = DummyRedis(fail_tolerance=2, prefix=prefix)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-        data = janitor.scan_iter(match=prefix)
-        keys = [k for k in data]
-        expected = [k for k in redis_client.keys() if k.startswith(prefix)]
-        assert janitor.redis_client.fail_count == redis_client.fail_tolerance
-        assert keys == expected
-
-        with pytest.raises(Exception):
-            redis_client = DummyRedis(hard_fail=True)
-            janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
-            janitor.scan_iter(match=prefix)
 
     def test_kill_pod(self):
         redis_client = DummyRedis(fail_tolerance=2)

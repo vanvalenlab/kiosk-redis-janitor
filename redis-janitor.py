@@ -72,11 +72,9 @@ if __name__ == '__main__':
 
     _logger = logging.getLogger(__file__)
 
-    REDIS = redis.StrictRedis(
-        host=os.getenv('REDIS_HOST'),
-        port=os.getenv('REDIS_PORT'),
-        decode_responses=True,
-        charset='utf-8')
+    REDIS = redis_janitor.redis.RedisClient(
+        os.getenv('REDIS_HOST'),
+        os.getenv('REDIS_PORT'))
 
     janitor = redis_janitor.RedisJanitor(redis_client=REDIS)
 
