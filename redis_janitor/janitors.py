@@ -79,6 +79,14 @@ class RedisJanitor(object):
                           len(response.items), timeit.default_timer() - t)
         return response.items
 
+    def reset_redis_key(self, redis_key):
+        # remove the key from the processing queue, if present
+        self.redis_client.lrem(self.processing_queue, 1, redis_key)
+        # set the status back to `new`
+        self.redis_client.hset(redis_key, 'status', 'new')
+        # push the key back into the work queue
+        self.redis_client.lpush(self.queue, redis_key)
+
     def triage(self, key, all_pods):
         key_status = self.redis_client.hget(key, 'status')
 
@@ -96,7 +104,7 @@ class RedisJanitor(object):
             except IndexError:
                 self.logger.info('Pod %s not found. Resetting record `%s`.',
                                  host, key)
-                self.redis_client.hset(key, 'status', 'new')
+                self.reset_redis_key(key)
                 return True
 
             # the pod's still around, but is something wrong with it?
@@ -107,7 +115,7 @@ class RedisJanitor(object):
                                  'and then resetting record `%s`.',
                                  host, pod.status.phase, key)
                 self.kill_pod(host, 'deepcell')  # TODO: hardcoded namespace
-                self.redis_client.hset(key, 'status', 'new')
+                self.reset_redis_key(key)
                 return True
 
             # has the key's status been updated in the last N seconds?
@@ -133,15 +141,15 @@ class RedisJanitor(object):
                 self.logger.info('Key `%s` has not been updated in %s seconds.'
                                  ' Resetting it now.',
                                  key, update_diff)
-                self.redis_client.hset(key, 'status', 'new')
+                self.reset_redis_key(key)
                 return True
 
         elif key_status == 'failed':  # TODO: should we restart all failures?
             # key failed, so reset it
             failure_reason = self.redis_client.hget(key, 'reason')
-            self.redis_client.hset(key, 'status', 'new')
             self.logger.info('Key %s failed due to "%s". Resetting it now.',
                              key, failure_reason)
+            self.reset_redis_key(key)
             return True
 
         return False
