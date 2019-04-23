@@ -124,8 +124,7 @@ class RedisJanitor(object):
             try:
                 current_time = datetime.datetime.now(pytz.UTC).isoformat()
                 updated_time = self.redis_client.hget(key, 'updated_at')
-                isoformat = '%Y-%m-%dT%H:%M:%S.%f'
-                parse = lambda x: datetime.datetime.strptime(x, isoformat)
+                parse = lambda x: datetime.datetime.fromisoformat(x)
                 update_diff = parse(current_time) - parse(updated_time)
             except (TypeError, ValueError) as err:
                 self.logger.info('Key %s with information %s has no '
