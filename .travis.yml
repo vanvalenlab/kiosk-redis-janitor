@@ -1,5 +1,5 @@
-sudo: true
-dist: xenial
+sudo: false
+dist: trusty
 
 git:
   depth: false
@@ -7,10 +7,9 @@ git:
 language: python
 
 python:
-  - 3.7
-  # - 3.6
-  # - 3.5
-  # - 2.7
+  - 2.7
+  - 3.5
+  - 3.6
 
 cache: pip
 

@@ -33,6 +33,7 @@ import datetime
 import logging
 
 import pytz
+import dateutil.parser
 import kubernetes.client
 
 
@@ -122,10 +123,12 @@ class RedisJanitor(object):
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
             try:
-                current_time = datetime.datetime.now(pytz.UTC).isoformat()
+                current_time = datetime.datetime.now(pytz.UTC)
                 updated_time = self.redis_client.hget(key, 'updated_at')
-                parse = lambda x: datetime.datetime.fromisoformat(x)
-                update_diff = parse(current_time) - parse(updated_time)
+                # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
+                # updated_time = datetime.datetime.fromisoformat(updated_time)
+                updated_time = dateutil.parser.parse(updated_time)
+                update_diff = current_time - updated_time
             except (TypeError, ValueError) as err:
                 self.logger.info('Key %s with information %s has no '
                                  'appropriate `updated_at` '
