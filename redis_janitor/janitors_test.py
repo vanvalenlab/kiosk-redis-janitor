@@ -30,6 +30,7 @@ from __future__ import print_function
 
 import datetime
 
+import pytz
 import kubernetes
 
 from redis_janitor import janitors
@@ -95,12 +96,10 @@ class DummyRedis(object):
         elif field == 'updated_at':
             if 'malformed' in rhash:
                 return None
-            now = datetime.datetime.utcnow()
+            now = datetime.datetime.now(pytz.UTC)
             if 'stale' in rhash:
-                return datetime.datetime.strftime(
-                    now - datetime.timedelta(hours=1), '%Y-%m-%dT%H:%M:%S.%f')
-            return datetime.datetime.strftime(
-                now - datetime.timedelta(minutes=1), '%Y-%m-%dT%H:%M:%S.%f')
+                return (now - datetime.timedelta(hours=1)).isoformat(' ')
+            return (now - datetime.timedelta(minutes=1)).isoformat(' ')
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
