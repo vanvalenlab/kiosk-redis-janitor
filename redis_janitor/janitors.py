@@ -32,6 +32,7 @@ import timeit
 import datetime
 import logging
 
+import pytz
 import kubernetes.client
 
 
@@ -121,7 +122,7 @@ class RedisJanitor(object):
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
             try:
-                current_time = datetime.datetime.utcnow().isoformat()
+                current_time = datetime.datetime.now(pytz.UTC).isoformat()
                 updated_time = self.redis_client.hget(key, 'updated_at')
                 isoformat = '%Y-%m-%dT%H:%M:%S.%f'
                 parse = lambda x: datetime.datetime.strptime(x, isoformat)
