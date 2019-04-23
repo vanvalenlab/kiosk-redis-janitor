@@ -33,4 +33,4 @@ RUN pip install -r requirements.txt
 
 COPY . .
 
-CMD ["python", "redis-janitor.py"]
+CMD ["/bin/sh", "-c", "python redis-janitor.py"]
