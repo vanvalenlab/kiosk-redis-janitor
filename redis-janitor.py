@@ -68,6 +68,7 @@ def initialize_logger(debug_mode=True):
 
 if __name__ == '__main__':
     INTERVAL = int(os.getenv('INTERVAL', '20'))
+    QUEUE = os.getenv('QUEUE', 'predict')
 
     initialize_logger(os.getenv('DEBUG'))
 
@@ -77,7 +78,7 @@ if __name__ == '__main__':
         os.getenv('REDIS_HOST'),
         os.getenv('REDIS_PORT'))
 
-    janitor = redis_janitor.RedisJanitor(redis_client=REDIS)
+    janitor = redis_janitor.RedisJanitor(redis_client=REDIS, queue=QUEUE)
 
     while True:
         try:

@@ -62,6 +62,12 @@ class DummyRedis(object):
             return (k for k in self.keys if k.startswith(match[:-1]))
         return (k for k in self.keys)
 
+    def lrem(self, *_, **__):
+        return True
+
+    def lpush(self, *_, **__):
+        return True
+
     def expected_keys(self, suffix=None):
         for k in self.keys:
             v = k.split('_')
@@ -138,7 +144,7 @@ class TestJanitor(object):
 
     def test_kill_pod(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, 'q', backoff=0.01)
         janitor.get_core_v1_client = DummyKubernetes
         assert janitor.kill_pod('pass', 'ns') is True
 
@@ -147,7 +153,7 @@ class TestJanitor(object):
 
     def test_list_pod_for_all_namespaces(self):
         redis_client = DummyRedis(fail_tolerance=2)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, 'q', backoff=0.01)
         janitor.get_core_v1_client = DummyKubernetes
 
         items = janitor.list_pod_for_all_namespaces()
@@ -160,7 +166,7 @@ class TestJanitor(object):
 
     def test_triage(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0)
+        janitor = janitors.RedisJanitor(redis_client, 'q', backoff=0)
 
         janitor.kill_pod = lambda x, y: True
 
@@ -201,7 +207,7 @@ class TestJanitor(object):
 
     def test_triage_keys(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, backoff=0.01)
+        janitor = janitors.RedisJanitor(redis_client, 'q', backoff=0.01)
         janitor.get_core_v1_client = DummyKubernetes
 
         # monkey-patch kubectl commands
