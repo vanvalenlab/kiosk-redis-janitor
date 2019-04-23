@@ -95,12 +95,12 @@ class DummyRedis(object):
         elif field == 'updated_at':
             if 'malformed' in rhash:
                 return None
-            now = datetime.datetime.now(datetime.timezone.utc)
+            now = datetime.datetime.utcnow()
             if 'stale' in rhash:
                 return datetime.datetime.strftime(
-                    now - datetime.timedelta(hours=1), '%b %d, %Y %H:%M:%S.%f')
+                    now - datetime.timedelta(hours=1), '%Y-%m-%dT%H:%M:%S.%f')
             return datetime.datetime.strftime(
-                now - datetime.timedelta(minutes=1), '%b %d, %Y %H:%M:%S.%f')
+                now - datetime.timedelta(minutes=1), '%Y-%m-%dT%H:%M:%S.%f')
         return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613

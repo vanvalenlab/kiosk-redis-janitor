@@ -121,11 +121,10 @@ class RedisJanitor(object):
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
             try:
-                fmt = '%b %d, %Y %H:%M:%S.%f'
-                current_time = datetime.datetime.now(datetime.timezone.utc)
-                current_time = current_time.strftime(fmt)
+                current_time = datetime.datetime.utcnow().isoformat()
                 updated_time = self.redis_client.hget(key, 'updated_at')
-                parse = lambda x: datetime.datetime.strptime(x, fmt)
+                isoformat = '%Y-%m-%dT%H:%M:%S.%f'
+                parse = lambda x: datetime.datetime.strptime(x, isoformat)
                 update_diff = parse(current_time) - parse(updated_time)
             except (TypeError, ValueError) as err:
                 self.logger.info('Key %s with information %s has no '
