@@ -50,8 +50,7 @@ class RedisJanitor(object):
     def get_core_v1_client(self):
         """Returns Kubernetes API Client for CoreV1Api"""
         kubernetes.config.load_incluster_config()
-        kube_client = kubernetes.client.CoreV1Api()
-        return kube_client
+        return kubernetes.client.CoreV1Api()
 
     def kill_pod(self, pod_name, namespace):
         # delete the pod
