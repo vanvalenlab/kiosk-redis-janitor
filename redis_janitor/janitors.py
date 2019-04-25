@@ -28,30 +28,29 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import time
 import timeit
+import datetime
 import logging
 
-import redis
+import pytz
+import dateutil.parser
 import kubernetes.client
 
 
-class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
+class RedisJanitor(object):
 
-    def __init__(self, redis_client, backoff=3):
+    def __init__(self, redis_client, queue, backoff=3):
         self.redis_client = redis_client
         self._repairs = 0
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
+        self.queue = str(queue).lower()
+        self.processing_queue = 'processing-{}'.format(self.queue)
 
     def get_core_v1_client(self):
         """Returns Kubernetes API Client for CoreV1Api"""
-        t = timeit.default_timer()
         kubernetes.config.load_incluster_config()
-        kube_client = kubernetes.client.CoreV1Api()
-        self.logger.debug('Created CoreV1Api client in %s seconds.',
-                          timeit.default_timer() - t)
-        return kube_client
+        return kubernetes.client.CoreV1Api()
 
     def kill_pod(self, pod_name, namespace):
         # delete the pod
@@ -81,104 +80,32 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                           len(response.items), timeit.default_timer() - t)
         return response.items
 
-    def hset(self, rhash, key, value):
-        while True:
-            try:
-                response = self.redis_client.hset(rhash, key, value)
-                break
-            except (ConnectionError, redis.exceptions.ConnectionError) as err:
-                self.logger.warning('Encountered %s: %s when calling HSET. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
-            except Exception as err:
-                self.logger.error('Unexpected %s: %s when calling HSET.',
-                                  type(err).__name__, err)
-                raise err
-        return response
-
-    def scan_iter(self, match=None, count=None):
-        while True:
-            try:
-                response = self.redis_client.scan_iter(match=match, count=count)
-                break
-            except (ConnectionError, redis.exceptions.ConnectionError) as err:
-                self.logger.warning('Encountered %s: %s when calling SCAN. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
-            except Exception as err:
-                self.logger.error('Unexpected %s: %s when calling SCAN.',
-                                  type(err).__name__, err)
-                raise err
-        return response
-
-    def _redis_type(self, redis_key):
-        while True:
-            try:
-                response = self.redis_client.type(redis_key)
-                break
-            except (ConnectionError, redis.exceptions.ConnectionError) as err:
-                self.logger.warning('Encountered %s: %s when calling TYPE. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
-            except Exception as err:
-                self.logger.error('Unexpected %s: %s when calling TYPE.',
-                                  type(err).__name__, err)
-                raise err
-        return response
-
-    def hget(self, rhash, key):
-        while True:
-            try:
-                response = self.redis_client.hget(rhash, key)
-                break
-            except (ConnectionError, redis.exceptions.ConnectionError) as err:
-                self.logger.warning('Encountered %s: %s when calling HGET. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
-            except Exception as err:
-                self.logger.error('Unexpected %s: %s when calling HGET.',
-                                  type(err).__name__, err)
-                raise err
-        return response
-
-    def hgetall(self, rhash):
-        while True:
-            try:
-                response = self.redis_client.hgetall(rhash)
-                break
-            except (ConnectionError, redis.exceptions.ConnectionError) as err:
-                self.logger.warning('Encountered %s: %s when calling HGETALL. '
-                                    'Retrying in %s seconds.',
-                                    type(err).__name__, err, self.backoff)
-                time.sleep(self.backoff)
-            except Exception as err:
-                # Why didn't we catch this?
-                self.logger.error('Unexpected %s: %s when calling HGETALL. ',
-                                  type(err).__name__, err)
-                raise err
-        return response
+    def reset_redis_key(self, redis_key):
+        # remove the key from the processing queue, if present
+        self.redis_client.lrem(self.processing_queue, 1, redis_key)
+        # set the status back to `new`
+        self.redis_client.hset(redis_key, 'status', 'new')
+        # push the key back into the work queue
+        self.redis_client.lpush(self.queue, redis_key)
 
     def triage(self, key, all_pods):
-        key_status = self.hget(key, 'status')
+        key_status = self.redis_client.hget(key, 'status')
 
         if key_status not in {'new', 'done', 'failed'}:
             # is the pod processing this key alive?
-            host = self.hget(key, 'identity_started')
+            host = self.redis_client.hget(key, 'identity_started')
 
             if not host:
                 self.logger.warning('Entry `%s` is malformed. %s',
-                                    key, self.hgetall(key))
+                                    key, self.redis_client.hgetall(key))
                 return False
 
             try:
                 pod = [p for p in all_pods if p.metadata.name == host][0]
             except IndexError:
-                self.logger.info('Pod %s is AWOL. Resetting record %s.', host, key)
-                self.hset(key, 'status', 'new')
+                self.logger.info('Pod %s not found. Resetting record `%s`.',
+                                 host, key)
+                self.reset_redis_key(key)
                 return True
 
             # the pod's still around, but is something wrong with it?
@@ -186,41 +113,44 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
                 # we need to make sure it gets killed
                 # and then reset the status of the job
                 self.logger.info('Pod %s is in status `%s`.  Killing it '
-                                 'and then resetting record %s.',
+                                 'and then resetting record `%s`.',
                                  host, pod.status.phase, key)
                 self.kill_pod(host, 'deepcell')  # TODO: hardcoded namespace
-                self.hset(key, 'status', 'new')
+                self.reset_redis_key(key)
                 return True
 
             # has the key's status been updated in the last N seconds?
             timeout_seconds = 300
-            current_time = time.time()
-
             try:
-                last_update = float(self.hget(key, 'timestamp_last_status_update'))
-                seconds_since_last_update = current_time - (last_update / 1000)
-            except TypeError as err:
+                current_time = datetime.datetime.now(pytz.UTC)
+                updated_time = self.redis_client.hget(key, 'updated_at')
+                # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
+                # updated_time = datetime.datetime.fromisoformat(updated_time)
+                updated_time = dateutil.parser.parse(updated_time)
+                update_diff = current_time - updated_time
+            except (TypeError, ValueError) as err:
                 self.logger.info('Key %s with information %s has no '
-                                 'appropriate timestamp_last_status_update '
-                                 'field. %s: %s', key, self.hgetall(key),
+                                 'appropriate `updated_at` '
+                                 'field. %s: %s', key,
+                                 self.redis_client.hgetall(key),
                                  type(err).__name__, err)
                 return False
 
-            if seconds_since_last_update >= timeout_seconds:
+            if update_diff.total_seconds() >= timeout_seconds:
                 # This entry has not been updated in at least `timeout_seconds`
                 # Assume it has died, and reset the status
                 self.logger.info('Key `%s` has not been updated in %s seconds.'
-                                 ' Resetting its status now.',
-                                 key, seconds_since_last_update)
-                self.hset(key, 'status', 'new')
+                                 ' Resetting it now.',
+                                 key, update_diff)
+                self.reset_redis_key(key)
                 return True
 
         elif key_status == 'failed':  # TODO: should we restart all failures?
-            # key failed, so try it again
-            failure_reason = self.hget(key, 'reason')
-            self.logger.info('Key %s failed due to "%s". Resetting its '
-                             'status now.', key, failure_reason)
-            self.hset(key, 'status', 'new')
+            # key failed, so reset it
+            failure_reason = self.redis_client.hget(key, 'reason')
+            self.logger.info('Key %s failed due to "%s". Resetting it now.',
+                             key, failure_reason)
+            self.reset_redis_key(key)
             return True
 
         return False
@@ -233,8 +163,8 @@ class RedisJanitor(object):  # pylint: disable=useless-object-inheritance
         pods = self.list_pod_for_all_namespaces()
         self.logger.info('Found %s pods.', len(pods))
 
-        for key in self.scan_iter(count=1000):
-            if self._redis_type(key) == 'hash':
+        for key in self.redis_client.scan_iter(count=1000):
+            if self.redis_client.type(key) == 'hash':
                 key_repaired = self.triage(key, pods)
                 num_repaired = int(key_repaired)
                 repairs += num_repaired

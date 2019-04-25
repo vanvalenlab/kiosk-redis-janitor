@@ -27,6 +27,8 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from redis_janitor import redis
+
 from redis_janitor.janitors import RedisJanitor
 
 del absolute_import

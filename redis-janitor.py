@@ -44,7 +44,8 @@ def initialize_logger(debug_mode=True):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter('[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
+    formatter = logging.Formatter(
+        '[%(asctime)s]:[%(levelname)s]:[%(name)s]: %(message)s')
     console = logging.StreamHandler(stream=sys.stdout)
     console.setFormatter(formatter)
 
@@ -67,18 +68,17 @@ def initialize_logger(debug_mode=True):
 
 if __name__ == '__main__':
     INTERVAL = int(os.getenv('INTERVAL', '20'))
+    QUEUE = os.getenv('QUEUE', 'predict')
 
     initialize_logger(os.getenv('DEBUG'))
 
     _logger = logging.getLogger(__file__)
 
-    REDIS = redis.StrictRedis(
-        host=os.getenv('REDIS_HOST'),
-        port=os.getenv('REDIS_PORT'),
-        decode_responses=True,
-        charset='utf-8')
+    REDIS = redis_janitor.redis.RedisClient(
+        os.getenv('REDIS_HOST'),
+        os.getenv('REDIS_PORT'))
 
-    janitor = redis_janitor.RedisJanitor(redis_client=REDIS)
+    janitor = redis_janitor.RedisJanitor(redis_client=REDIS, queue=QUEUE)
 
     while True:
         try:
