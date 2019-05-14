@@ -169,10 +169,7 @@ class RedisJanitor(object):
         return False
 
     def triage_keys(self):
-        # or, 1,000 reasons to restart a key
         repairs = 0
-
-        # get list of all pods
         pods = self.list_pod_for_all_namespaces()
         pod_dict = {p.metadata.name: p for p in pods}
         self.logger.info('Found %s pods.', len(pods))
