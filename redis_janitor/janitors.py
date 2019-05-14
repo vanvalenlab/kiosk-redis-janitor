@@ -39,12 +39,16 @@ import kubernetes.client
 
 class RedisJanitor(object):
 
-    def __init__(self, redis_client, queue, backoff=3):
+    def __init__(self, redis_client, queue,
+                 backoff=3, stale_time=0,
+                 restart_failures=False):
         self.redis_client = redis_client
         self._repairs = 0
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
         self.queue = str(queue).lower()
+        self.stale_time = int(stale_time)
+        self.restart_failures = restart_failures
         self.processing_queue = 'processing-{}'.format(self.queue)
 
     def get_core_v1_client(self):
@@ -89,67 +93,76 @@ class RedisJanitor(object):
         self.redis_client.lpush(self.queue, redis_key)
 
     def triage(self, key, all_pods):
-        key_status = self.redis_client.hget(key, 'status')
+        hvals = self.redis_client.hgetall(key)
+        key_status = hvals.get('status')
 
-        if key_status not in {'new', 'done', 'failed'}:
-            # is the pod processing this key alive?
-            host = self.redis_client.hget(key, 'identity_started')
+        if key_status in {'new', 'done'}:
+            # either not started or successuflly completed. no action taken.
+            return False
 
-            if not host:
-                self.logger.warning('Entry `%s` is malformed. %s',
-                                    key, self.redis_client.hgetall(key))
-                return False
-
-            try:
-                pod = [p for p in all_pods if p.metadata.name == host][0]
-            except IndexError:
-                self.logger.info('Pod %s not found. Resetting record `%s`.',
-                                 host, key)
+        # TODO: some failures should be restarted, other not
+        if key_status == 'failed':
+            reset_text = ' Resetting it now.' if self.restart_failures else ''
+            self.logger.info('Key %s failed due to "%s".%s',
+                             key, hvals.get('reason', 'REASON NOT FOUND'),
+                             reset_text)
+            if self.restart_failures:
                 self.reset_redis_key(key)
-                return True
+            return self.restart_failures
 
-            # the pod's still around, but is something wrong with it?
-            if pod.status.phase != 'Running':
-                # we need to make sure it gets killed
-                # and then reset the status of the job
-                self.logger.info('Pod %s is in status `%s`.  Killing it '
-                                 'and then resetting record `%s`.',
-                                 host, pod.status.phase, key)
-                self.kill_pod(host, 'deepcell')  # TODO: hardcoded namespace
-                self.reset_redis_key(key)
-                return True
+        # status is not a beginning or ending status,
+        # but is the key actively being processed?
 
-            # has the key's status been updated in the last N seconds?
-            timeout_seconds = 300
-            try:
-                current_time = datetime.datetime.now(pytz.UTC)
-                updated_time = self.redis_client.hget(key, 'updated_at')
-                # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
-                # updated_time = datetime.datetime.fromisoformat(updated_time)
-                updated_time = dateutil.parser.parse(updated_time)
-                update_diff = current_time - updated_time
-            except (TypeError, ValueError) as err:
-                self.logger.info('Key %s with information %s has no '
-                                 'appropriate `updated_at` '
-                                 'field. %s: %s', key,
-                                 self.redis_client.hgetall(key),
-                                 type(err).__name__, err)
-                return False
+        # is the pod processing this key alive?
+        host = hvals.get('identity_started')
+        if not host:
+            # if the status is not `new`, we would expect there to be that
+            # the host that changed the status would be `identity_started`
+            self.logger.warning('Key `%s` has status `%s` but no value for'
+                                ' `identity_started`.',
+                                key, self.redis_client.hgetall(key))
+            return False
 
-            if update_diff.total_seconds() >= timeout_seconds:
-                # This entry has not been updated in at least `timeout_seconds`
-                # Assume it has died, and reset the status
-                self.logger.info('Key `%s` has not been updated in %s seconds.'
-                                 ' Resetting it now.',
-                                 key, update_diff)
-                self.reset_redis_key(key)
-                return True
+        pod = all_pods.get(host)
 
-        elif key_status == 'failed':  # TODO: should we restart all failures?
-            # key failed, so reset it
-            failure_reason = self.redis_client.hget(key, 'reason')
-            self.logger.info('Key %s failed due to "%s". Resetting it now.',
-                             key, failure_reason)
+        # does the pod that started the key still exist?
+        if not pod:
+            self.logger.info('Key `%s` was started by pod `%s`, but this '
+                             'pod cannot be found. Resetting key.',
+                             key, host)
+            self.reset_redis_key(key)
+            return True
+
+        # is the pod still running?
+        if pod.status.phase != 'Running':
+            # we need to make sure it gets killed.
+            # and then reset the status of the job
+            self.logger.info('Pod %s is in status `%s`.  Killing it '
+                             'and then resetting record `%s`.',
+                             host, pod.status.phase, key)
+            self.kill_pod(host, 'deepcell')  # TODO: hardcoded namespace
+            self.reset_redis_key(key)
+            return True
+
+        # has the key's status been updated in the last N seconds?
+        try:
+            updated_time = hvals.get('updated_at')
+            # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
+            # updated_time = datetime.datetime.fromisoformat(updated_time)
+            updated_time = dateutil.parser.parse(updated_time)
+            current_time = datetime.datetime.now(pytz.UTC)
+            update_diff = current_time - updated_time
+        except (TypeError, ValueError):
+            self.logger.info('Key `%s` has status `%s` but has no '
+                             '`updated_at` field.', key, key_status)
+            return False
+
+        if update_diff.total_seconds() >= self.stale_time > 0:
+            # This entry has not been updated in at least `timeout_seconds`
+            # Assume it has died, and reset the status
+            self.logger.info('Key `%s` has not been updated in %s seconds, '
+                             'which is longer than %s seconds. Resetting it '
+                             'now.', key, update_diff, self.stale_time)
             self.reset_redis_key(key)
             return True
 
@@ -161,11 +174,12 @@ class RedisJanitor(object):
 
         # get list of all pods
         pods = self.list_pod_for_all_namespaces()
+        pod_dict = {p.metadata.name: p for p in pods}
         self.logger.info('Found %s pods.', len(pods))
 
         for key in self.redis_client.scan_iter(count=1000):
             if self.redis_client.type(key) == 'hash':
-                key_repaired = self.triage(key, pods)
+                key_repaired = self.triage(key, pod_dict)
                 num_repaired = int(key_repaired)
                 repairs += num_repaired
                 self._repairs += num_repaired

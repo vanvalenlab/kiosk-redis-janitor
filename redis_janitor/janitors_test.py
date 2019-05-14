@@ -69,53 +69,32 @@ class DummyRedis(object):
     def lpush(self, *_, **__):
         return True
 
-    def expected_keys(self, suffix=None):
-        for k in self.keys:
-            v = k.split('_')
-            if v[0] == self.prefix:
-                if v[1] == self.status:
-                    if suffix:
-                        if v[-1].lower().endswith(suffix):
-                            yield k
-                    else:
-                        yield k
-
     def hmset(self, rhash, hvals):  # pylint: disable=W0613
         return hvals
-
-    def hget(self, rhash, field):
-        if field == 'status':
-            return rhash.split('_')[1]
-        elif field == 'identity_started':
-            if 'good' in rhash:
-                return 'good_pod'
-            elif 'badhost' in rhash:
-                return None
-            else:
-                return 'bad_pod'
-        elif field == 'updated_at':
-            if 'malformed' in rhash:
-                return None
-            now = datetime.datetime.now(pytz.UTC)
-            if 'stale' in rhash:
-                return (now - datetime.timedelta(hours=1)).isoformat(' ')
-            return (now - datetime.timedelta(minutes=1)).isoformat(' ')
-        return None
 
     def hset(self, rhash, status, value):  # pylint: disable=W0613
         return {status: value}
 
     def hgetall(self, rhash):  # pylint: disable=W0613
+        now = datetime.datetime.now(pytz.UTC)
+        later = (now - datetime.timedelta(minutes=3))
+        identity = 'good_pod' if 'good' in rhash else 'bad_pod'
+        identity = None if 'badhost' in rhash else identity
+        updated = (later if 'stale' in rhash else now).isoformat(' ')
+        updated = None if 'malformed' in rhash else updated
         return {
             'model_name': 'model',
             'model_version': '0',
             'field': '61',
             'cuts': '0',
+            'identity_started': identity,
+            'status': rhash.split(':')[-1],
             'postprocess_function': '',
             'preprocess_function': '',
-            'file_name': rhash.split('_')[-1],
-            'input_file_name': rhash.split('_')[-1],
-            'output_file_name': rhash.split('_')[-1]
+            'file_name': rhash.split(':')[-1],
+            'input_file_name': rhash.split(':')[-1],
+            'output_file_name': rhash.split(':')[-1],
+            'updated_at': updated,
         }
 
     def type(self, key):  # pylint: disable=W0613
@@ -165,44 +144,54 @@ class TestJanitor(object):
 
     def test_triage(self):
         redis_client = DummyRedis(fail_tolerance=0)
-        janitor = janitors.RedisJanitor(redis_client, 'q', backoff=0)
-
-        janitor.kill_pod = lambda x, y: True
+        janitor = janitors.RedisJanitor(redis_client, 'q', 0)
 
         def pod(key):
             status = 'Failed' if 'failed' in key else 'Running'
             name = 'good_pod' if 'good' in key else 'bad_pod'
-            return [Bunch(metadata=Bunch(name=name),
-                          status=Bunch(phase=status))]
+            return {name: Bunch(metadata=Bunch(name=name),
+                                status=Bunch(phase=status))}
 
         # test end point statuses
-        assert janitor.triage('goodkey_failed', pod('goodkey_failed')) is True
-        assert janitor.triage('goodkey_new', pod('goodkey_new')) is False
-        assert janitor.triage('goodkey_done', pod('goodkey_done')) is False
+        assert janitor.triage('goodkey:new', pod('goodkey:new')) is False
+        assert janitor.triage('goodkey:done', pod('goodkey:done')) is False
+
+        # test failed status
+        janitor = janitors.RedisJanitor(redis_client, 'q', 0,
+                                        restart_failures=True)
+        assert janitor.triage('goodkey:failed', pod('goodkey:failed')) is True
+
+        janitor = janitors.RedisJanitor(redis_client, 'q', 0)
+        assert janitor.triage('goodkey:failed', pod('goodkey:failed')) is False
 
         # test malformed key (no hostname value)
-        assert janitor.triage('badhost_weirdstatus',
-                              pod('badhost_weirdstatus')) is False
+        assert janitor.triage('badhost:weirdstatus',
+                              pod('badhost:weirdstatus')) is False
 
         # test pod not found
-        assert janitor.triage('badkey_inprogress', []) is True
+        janitor.kill_pod = lambda x, y: True
+        assert janitor.triage('badkey_inprogress', {}) is True
 
         # test in progress with status != Running
-        pods = [Bunch(metadata=Bunch(name='good_pod'),
-                      status=Bunch(phase='Failed'))]
-        assert janitor.triage('goodkey_inprogress', pods) is True
+        pods = {'good_pod': Bunch(metadata=Bunch(name='good_pod'),
+                                  status=Bunch(phase='Failed'))}
+        assert janitor.triage('goodkey:inprogress', pods) is True
 
         # test in progress with status = Running with stale update time
-        assert janitor.triage('goodkeystale_inprogress',
-                              pod('goodkeystale_inprogress')) is True
+        assert janitor.triage('goodkeystale:inprogress',
+                              pod('goodkeystale:inprogress')) is False
+
+        janitor = janitors.RedisJanitor(redis_client, 'q', 0, stale_time=60)
+        assert janitor.triage('goodkeystale:inprogress',
+                              pod('goodkeystale:inprogress')) is True
 
         # test in progress with status = Running with fresh update time
-        assert janitor.triage('goodkey_inprogress',
-                              pod('goodkey_inprogress')) is False
+        assert janitor.triage('goodkey:inprogress',
+                              pod('goodkey:inprogress')) is False
 
         # test no `updated_at`
-        assert janitor.triage('goodmalformed_inprogress',
-                              pod('goodmalformed_inprogress')) is False
+        assert janitor.triage('goodmalformed:inprogress',
+                              pod('goodmalformed:inprogress')) is False
 
     def test_triage_keys(self):
         redis_client = DummyRedis(fail_tolerance=0)

@@ -31,11 +31,8 @@ import os
 import sys
 import time
 import logging
-import traceback
 import logging.handlers
-
-import redis
-import kubernetes
+import traceback
 
 import redis_janitor
 
@@ -69,6 +66,7 @@ def initialize_logger(debug_mode=True):
 if __name__ == '__main__':
     INTERVAL = int(os.getenv('INTERVAL', '20'))
     QUEUE = os.getenv('QUEUE', 'predict')
+    STALE_TIME = os.getenv('STALE_TIME', '0')
 
     initialize_logger(os.getenv('DEBUG'))
 
@@ -78,7 +76,10 @@ if __name__ == '__main__':
         os.getenv('REDIS_HOST'),
         os.getenv('REDIS_PORT'))
 
-    janitor = redis_janitor.RedisJanitor(redis_client=REDIS, queue=QUEUE)
+    janitor = redis_janitor.RedisJanitor(
+        redis_client=REDIS,
+        queue=QUEUE,
+        stale_time=STALE_TIME)
 
     while True:
         try:
