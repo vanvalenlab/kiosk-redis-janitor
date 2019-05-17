@@ -58,7 +58,6 @@ class RedisJanitor(object):
         self.restart_failures = restart_failures
         self.failure_stale_seconds = failure_stale_seconds
         self.pod_refresh_interval = int(pod_refresh_interval)
-        self.cleaning_queue = ''  # update this in clean()
 
         # empty initializers, update them with _update_pods
         self.pods = {}
@@ -70,6 +69,7 @@ class RedisJanitor(object):
 
         self.total_repairs = 0
         self.processing_queue = 'processing-{}'.format(self.queue)
+        self.cleaning_queue = ''  # update this in clean()
 
     def get_core_v1_client(self):
         """Returns Kubernetes API Client for CoreV1Api"""
@@ -132,10 +132,10 @@ class RedisJanitor(object):
     def remove_key_from_queue(self, redis_key):
         start = timeit.default_timer()
         self.logger.info('Removing key `%s` from queue `%s`.',
-                         redis_key, self.processing_queue)
-        res = self.redis_client.lrem(self.processing_queue, 1, redis_key)
-        self.logger.info('Removed key `%s` from queue `%s` in %s seconds.',
-                         redis_key, self.processing_queue,
+                         redis_key, self.cleaning_queue)
+        res = self.redis_client.lrem(self.cleaning_queue, 1, redis_key)
+        self.logger.info('`LREM %s 1 %s` returned %s in %s seconds.',
+                         self.cleaning_queue, redis_key, res,
                          timeit.default_timer() - start)
         return res
 
@@ -229,7 +229,7 @@ class RedisJanitor(object):
         cleaned = 0
 
         for q in self.get_processing_keys(count=100):
-            self.cleaning_queue = q  # just for logging
+            self.cleaning_queue = q
             for i, key in enumerate(self.redis_client.lrange(q, 0, -1)):
                 if i >= 1:
                     self.logger.warning('Queue `%s` has an item with index %s.'
