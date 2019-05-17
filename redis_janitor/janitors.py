@@ -131,26 +131,24 @@ class RedisJanitor(object):
 
     def remove_key_from_queue(self, redis_key):
         start = timeit.default_timer()
-        self.logger.info('Removing key `%s` from queue `%s`.',
-                         redis_key, self.cleaning_queue)
         res = self.redis_client.lrem(self.cleaning_queue, 1, redis_key)
-        self.logger.info('`LREM %s 1 %s` returned %s in %s seconds.',
-                         self.cleaning_queue, redis_key, res,
-                         timeit.default_timer() - start)
+        if res:
+            self.logger.debug('Removed key `%s` from %s` in %s seconds.',
+                              redis_key, self.cleaning_queue,
+                              timeit.default_timer() - start)
+        else:
+            self.logger.warning('Failed to remove key `%s` from queue `%s`.',
+                                redis_key, self.cleaning_queue)
         return res
 
-    def restart_redis_key(self, redis_key, new_status='new'):
-        start = timeit.default_timer()
-        self.logger.info('Restarting key `%s`.', redis_key)
-        # reset key status
-        self.redis_client.hmset(redis_key, {
-            'status': new_status,
-            'updated_at': datetime.datetime.now(pytz.UTC).isoformat(),
-        })
-        self.remove_key_from_queue(redis_key)  # remove from processing queue
-        self.redis_client.lpush(self.queue, redis_key)  # push to work queue
-        self.logger.info('Restarted key `%s` in %s seconds.',
-                         redis_key, timeit.default_timer() - start)
+    def repair_redis_key(self, redis_key):
+        is_removed = self.remove_key_from_queue(redis_key)
+        if is_removed:
+            start = timeit.default_timer()
+            self.redis_client.lpush(self.queue, redis_key)
+            self.logger.debug('Repaired key `%s` from in %s seconds.',
+                              redis_key, timeit.default_timer() - start)
+        return is_removed
 
     def _update_pods(self):
         """Refresh pod data and update timestamp"""
@@ -174,20 +172,17 @@ class RedisJanitor(object):
     def is_valid_pod(self, pod_name):
         self.update_pods()  # only updates if stale
         is_valid = pod_name in self.pods
-        if not is_valid:
-            self.logger.info('Pod `%s` cannot be found in : %s',
-                             pod_name, self.pods.keys())
         return is_valid
 
     def is_stale_update_time(self, updated_time, stale_time=None):
         stale_time = stale_time if stale_time else self.stale_time
-        # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
-        # updated_time = datetime.datetime.fromisoformat(updated_time)
         if not updated_time:
             return False
         if not stale_time > 0:
             return False
         if isinstance(updated_time, str):
+            # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
+            # updated_time = datetime.datetime.fromisoformat(updated_time)
             updated_time = dateutil.parser.parse(updated_time)
         current_time = datetime.datetime.now(pytz.UTC)
         update_diff = current_time - updated_time
@@ -196,36 +191,22 @@ class RedisJanitor(object):
     def clean_key(self, key):
         hvals = self.redis_client.hgetall(key)
 
-        # pod_name = self.cleaning_queue.split(':')[-1]
-        # is_valid_pod = self.is_valid_pod(pod_name)
+        # is_valid_pod = self.is_valid_pod(self.cleaning_queue.split(':')[-1])
         is_stale = self.is_stale_update_time(hvals.get('updated_at'))
 
         # if is_valid_pod and not is_stale:
-        #     return False
         if not is_stale:
             return False
 
         key_status = hvals.get('status')
 
         # key is stale, must be repaired somehow
-        self.logger.info('Key `%s` has been in queue `%s` with status `%s`'
-                         ' for longer than `%s` seconds.', key,
-                         self.cleaning_queue, key_status, self.stale_time)
-
         if key_status in {'done', 'failed'}:
             # job is finished, no need to restart the key
-            self.remove_key_from_queue(key)
-            return True
-
-        # key is in-progress. check `updated_by` for new status value
-        if self.is_whitelisted(hvals.get('updated_by')):
-            new_status = key_status
-        else:
-            new_status = 'new'
+            return bool(self.remove_key_from_queue(key))
 
         # if the job is finished, no need to restart the key
-        self.restart_redis_key(key, new_status)
-        return True
+        return bool(self.repair_redis_key(key))
 
     def clean(self):
         cleaned = 0
@@ -237,6 +218,9 @@ class RedisJanitor(object):
                     self.logger.warning('Queue `%s` has an item with index %s.'
                                         ' This is strange.', q, i)
                 is_key_cleaned = self.clean_key(key)
+                if is_key_cleaned:
+                    self.logger.info('Repaired key `%s` from queue `%s`',
+                                     key, q)
                 cleaned = cleaned + int(is_key_cleaned)
 
         if cleaned:  # loop is finished, summary log
