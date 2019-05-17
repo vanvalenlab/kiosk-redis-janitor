@@ -38,17 +38,36 @@ import kubernetes.client
 
 
 class RedisJanitor(object):
+    """Clean up keys in the redis queue"""
 
-    def __init__(self, redis_client, queue,
-                 backoff=3, stale_time=0,
-                 restart_failures=False):
+    def __init__(self,
+                 redis_client,
+                 queue,
+                 namespace='default',
+                 backoff=3,
+                 stale_time=600,  # 10 minutes
+                 restart_failures=False,
+                 failure_stale_seconds=60,
+                 pod_refresh_interval=10,):
         self.redis_client = redis_client
-        self._repairs = 0
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
         self.queue = str(queue).lower()
+        self.namespace = namespace
         self.stale_time = int(stale_time)
         self.restart_failures = restart_failures
+        self.failure_stale_seconds = failure_stale_seconds
+        self.pod_refresh_interval = int(pod_refresh_interval)
+
+        # empty initializers, update them with _update_pods
+        self.pods = {}
+        self.pods_updated_at = None
+
+        # attributes for managing pod state
+        self.whitelisted_pods = ['zip-consumer']
+        self.valid_pod_phases = {'Running', 'Pending'}
+
+        self.total_repairs = 0
         self.processing_queue = 'processing-{}'.format(self.queue)
 
     def get_core_v1_client(self):
