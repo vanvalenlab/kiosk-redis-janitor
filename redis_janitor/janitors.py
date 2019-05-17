@@ -208,7 +208,7 @@ class RedisJanitor(object):
                              self.cleaning_queue, key_status, self.stale_time)
         else:
             self.logger.info('Key `%s` is in queue `%s` but pod `%s` does not'
-                             'exist.', key, self.cleaning_queue, pod_name)
+                             ' exist.', key, self.cleaning_queue, pod_name)
 
         if key_status in {'done', 'failed'}:
             # job is finished, no need to restart the key
@@ -239,5 +239,5 @@ class RedisJanitor(object):
 
         if cleaned:  # loop is finished, summary log
             self.total_repairs += cleaned
-            self.logger.info('Repaired %s keys (%s total).',
-                             cleaned, self.total_repairs)
+            self.logger.info('Repaired %s key%s (%s total).', cleaned,
+                             's' if cleaned else '', self.total_repairs)
