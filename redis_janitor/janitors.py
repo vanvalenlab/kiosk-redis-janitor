@@ -48,7 +48,7 @@ class RedisJanitor(object):
                  stale_time=600,  # 10 minutes
                  restart_failures=False,
                  failure_stale_seconds=60,
-                 pod_refresh_interval=10,):
+                 pod_refresh_interval=5,):
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
@@ -93,7 +93,7 @@ class RedisJanitor(object):
         return response
 
     def list_pod_for_all_namespaces(self):
-        t = timeit.default_timer()
+        start = timeit.default_timer()
         try:
             kube_client = self.get_core_v1_client()
             response = kube_client.list_pod_for_all_namespaces()
@@ -102,11 +102,11 @@ class RedisJanitor(object):
                               '%s: %s.', type(err).__name__, err)
             return []
         self.logger.debug('Found %s pods in %s seconds.',
-                          len(response.items), timeit.default_timer() - t)
+                          len(response.items), timeit.default_timer() - start)
         return response.items
 
     def list_namespaced_pod(self):
-        t = timeit.default_timer()
+        start = timeit.default_timer()
         try:
             kube_client = self.get_core_v1_client()
             response = kube_client.list_namespaced_pod(self.namespace)
@@ -116,7 +116,7 @@ class RedisJanitor(object):
             return []
         self.logger.debug('Found %s pods in namespace `%s` in %s seconds.',
                           len(response.items), self.namespace,
-                          timeit.default_timer() - t)
+                          timeit.default_timer() - start)
         return response.items
 
     def get_processing_keys(self, count=100):
@@ -173,7 +173,11 @@ class RedisJanitor(object):
 
     def is_valid_pod(self, pod_name):
         self.update_pods()  # only updates if stale
-        return pod_name in self.pods
+        is_valid = pod_name in self.pods
+        if not is_valid:
+            self.logger.info('Pod `%s` cannot be found in : %s',
+                             pod_name, self.pods.keys())
+        return is_valid
 
     def is_stale_update_time(self, updated_time, stale_time=None):
         stale_time = stale_time if stale_time else self.stale_time
@@ -192,24 +196,21 @@ class RedisJanitor(object):
     def clean_key(self, key):
         hvals = self.redis_client.hgetall(key)
 
-        pod_name = self.cleaning_queue.split(':')[-1]
-        is_valid_pod = self.is_valid_pod(pod_name)
+        # pod_name = self.cleaning_queue.split(':')[-1]
+        # is_valid_pod = self.is_valid_pod(pod_name)
         is_stale = self.is_stale_update_time(hvals.get('updated_at'))
 
-        if is_valid_pod and not is_stale:
+        # if is_valid_pod and not is_stale:
+        #     return False
+        if not is_stale:
             return False
 
         key_status = hvals.get('status')
 
         # key is stale, must be repaired somehow
-        if is_stale:
-            self.logger.info('Key `%s` has been in queue `%s` with status `%s`'
-                             ' for longer than `%s` seconds.', key,
-                             self.cleaning_queue, key_status, self.stale_time)
-        else:
-            self.logger.info('Key `%s` is in queue `%s` with status `%s` but '
-                             'pod `%s` does not exist.', key,
-                             self.cleaning_queue, key_status, pod_name)
+        self.logger.info('Key `%s` has been in queue `%s` with status `%s`'
+                         ' for longer than `%s` seconds.', key,
+                         self.cleaning_queue, key_status, self.stale_time)
 
         if key_status in {'done', 'failed'}:
             # job is finished, no need to restart the key
