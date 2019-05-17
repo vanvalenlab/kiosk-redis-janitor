@@ -119,6 +119,11 @@ class RedisJanitor(object):
                           timeit.default_timer() - t)
         return response.items
 
+    def get_processing_keys(self, count=100):
+        match = '{}:*'.format(self.processing_queue)
+        processing_keys = self.redis_client.scan_iter(match=match, count=count)
+        return processing_keys
+
     def is_whitelisted(self, pod_name):
         """Ignore missing pods that are whitelisted"""
         pod_name = str(pod_name)
@@ -219,11 +224,6 @@ class RedisJanitor(object):
         # if the job is finished, no need to restart the key
         self.restart_redis_key(key, new_status)
         return True
-
-    def get_processing_keys(self, count=100):
-        match = '{}:*'.format(self.processing_queue)
-        processing_keys = self.redis_client.scan_iter(match=match, count=count)
-        return processing_keys
 
     def clean(self):
         cleaned = 0
