@@ -83,8 +83,9 @@ class RedisJanitor(object):
             response = kube_client.delete_namespaced_pod(
                 pod_name, namespace, grace_period_seconds=0)
         except kubernetes.client.rest.ApiException as err:
-            self.logger.error('`delete_namespaced_pod` encountered %s: %s.',
-                              type(err).__name__, err)
+            self.logger.error('`delete_namespaced_pod` encountered %s: %s. '
+                              'Failed to kill pod `%s.%s`',
+                              type(err).__name__, err, namespace, pod_name)
             return False
         self.logger.debug('Killed pod `%s` in namespace `%s` in %s seconds.',
                           pod_name, namespace, timeit.default_timer() - t)
