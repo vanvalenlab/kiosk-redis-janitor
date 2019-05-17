@@ -190,9 +190,9 @@ class RedisJanitor(object):
             return False
 
         # key is stale, must be repaired somehow
-        self.logger.info('Key `%s` has been in queue `%s` with status'
-                         ' `%s` for longer than `%s` seconds.',
-                         key, self.cleaning_queue, key_status, self.stale_time)
+        self.logger.info('Key `%s` has been in queue `%s` with status `%s` for'
+                         ' longer than `%s` seconds.', key,
+                         self.cleaning_queue, key_status, self.stale_time)
 
         if key_status in {'done', 'failed'}:
             # job is finished, no need to restart the key
