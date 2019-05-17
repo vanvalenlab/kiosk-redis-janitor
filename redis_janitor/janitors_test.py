@@ -194,7 +194,6 @@ class TestJanitor(object):
         assert int(janitor.remove_key_from_queue(valid_key)) == 1
         assert int(janitor.remove_key_from_queue(invalid_key)) == 0
 
-
     def test__udpate_pods(self):
         janitor = self.get_client()
         janitor._update_pods()
