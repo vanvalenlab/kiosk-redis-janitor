@@ -58,6 +58,7 @@ class RedisJanitor(object):
         self.restart_failures = restart_failures
         self.failure_stale_seconds = failure_stale_seconds
         self.pod_refresh_interval = int(pod_refresh_interval)
+        self.cleaning_queue = None  # update this in clean()
 
         # empty initializers, update them with _update_pods
         self.pods = {}
@@ -127,10 +128,11 @@ class RedisJanitor(object):
         start = timeit.default_timer()
         self.logger.info('Removing key `%s` from queue `%s`.',
                          redis_key, self.processing_queue)
-        self.redis_client.lrem(self.processing_queue, 1, redis_key)
+        res = self.redis_client.lrem(self.processing_queue, 1, redis_key)
         self.logger.info('Removed key `%s` from queue `%s` in %s seconds.',
                          redis_key, self.processing_queue,
                          timeit.default_timer() - start)
+        return res
 
     def restart_redis_key(self, redis_key, new_status='new'):
         start = timeit.default_timer()
@@ -178,7 +180,7 @@ class RedisJanitor(object):
         update_diff = current_time - updated_time
         return update_diff.total_seconds() >= stale_time
 
-    def clean_key(self, key, queue):
+    def clean_key(self, key):
         hvals = self.redis_client.hgetall(key)
         self.update_pods()
 
@@ -190,10 +192,10 @@ class RedisJanitor(object):
         # key is stale, must be repaired somehow
         self.logger.info('Key `%s` has been in queue `%s` with status'
                          ' `%s` for longer than `%s` seconds.',
-                         key, queue, key_status, self.stale_time)
+                         key, self.cleaning_queue, key_status, self.stale_time)
 
         if key_status in {'done', 'failed'}:
-            # if the job is finished, no need to restart the key
+            # job is finished, no need to restart the key
             self.remove_key_from_queue(key)
             return True
 
@@ -207,16 +209,18 @@ class RedisJanitor(object):
         self.restart_redis_key(key, new_status)
         return True
 
+    def get_processing_keys(self, count=100):
+        match = '{}:*'.format(self.processing_queue)
+        processing_keys = self.redis_client.scan_iter(match=match, count=count)
+        return processing_keys
+
     def clean(self):
         cleaned = 0
 
-        processing_keys = self.redis_client.scan_iter(
-            match='{}:*'.format(self.processing_queue),
-            count=100)
-
-        for q in processing_keys:
+        for q in self.get_processing_keys(count=100):
+            self.cleaning_queue = q  # just for logging
             for key in self.redis_client.lrange(q, 0, -1):
-                is_key_cleaned = self.clean_key(key, q)
+                is_key_cleaned = self.clean_key(key)
                 cleaned = cleaned + int(is_key_cleaned)
 
         if cleaned:  # loop is finished, summary log

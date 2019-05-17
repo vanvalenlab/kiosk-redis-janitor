@@ -28,6 +28,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import random
 import datetime
 
 import pytz
@@ -44,44 +45,48 @@ class Bunch(object):
 
 
 class DummyRedis(object):
+    # pylint: disable=W0613,R0201
     def __init__(self, prefix='predict', status='new'):
         self.fail_count = 0
         self.prefix = '/'.join(x for x in prefix.split('/') if x)
         self.status = status
         self.keys = [
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.zip'),
-            '{}_{}_{}'.format('other', self.status, 'x.TIFF'),
-            '{}_{}_{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}_{}_{}'.format(self.prefix, 'other', 'x.tiff'),
-            '{}_{}_{}'.format('other', self.status, 'x.zip'),
+            '{}:{}:{}'.format(self.prefix, self.status, 'x.tiff'),
+            '{}:{}:{}'.format(self.prefix, 'other', 'x.zip'),
+            '{}:{}:{}'.format('other', self.status, 'x.TIFF'),
+            '{}:{}:{}'.format(self.prefix, self.status, 'x.ZIP'),
+            '{}:{}:{}'.format(self.prefix, 'other', 'x.tiff'),
+            '{}:{}:{}'.format('other', self.status, 'x.zip'),
         ]
 
     def scan_iter(self, match=None, count=None):
-        if match:
-            return (k for k in self.keys if k.startswith(match[:-1]))
-        return (k for k in self.keys)
+        for k in self.keys:
+            if match:
+                if k.startswith(match[:-1]):
+                    yield k
+            else:
+                yield k
 
-    def lrem(self, *_, **__):
-        return True
+    def lrem(self, key, count, value, *_, **kwargs):
+        return count
 
     def lpush(self, *_, **__):
+        return len(self.keys)
+
+    def hmset(self, rhash, hvals):
         return True
 
-    def hmset(self, rhash, hvals):  # pylint: disable=W0613
-        return hvals
-
-    def hset(self, rhash, status, value):  # pylint: disable=W0613
-        return {status: value}
+    def hset(self, rhash, status, value):
+        return True
 
     def lrange(self, queue, start, end):
-        return self.keys
+        return self.keys[start:end]
 
-    def hgetall(self, rhash):  # pylint: disable=W0613
+    def hgetall(self, rhash):
         now = datetime.datetime.now(pytz.UTC)
         later = (now - datetime.timedelta(minutes=60))
         identity = 'good_pod' if 'good' in rhash else 'bad_pod'
-        identity = None if 'badhost' in rhash else identity
+        identity = 'zip-consumer' if 'whitelist' in rhash else identity
         updated = (later if 'stale' in rhash else now).isoformat(' ')
         updated = None if 'malformed' in rhash else updated
         return {
@@ -99,7 +104,7 @@ class DummyRedis(object):
             'updated_at': updated,
         }
 
-    def type(self, key):  # pylint: disable=W0613
+    def type(self, key):
         return 'hash'
 
 
@@ -131,8 +136,11 @@ class TestJanitor(object):
     def get_client(self, **kwargs):
         if 'backoff' not in kwargs:
             kwargs['backoff'] = 0.01
-        redis_client = DummyRedis()
-        janitor = janitors.RedisJanitor(redis_client, 'q', **kwargs)
+        if 'queue' not in kwargs:
+            kwargs['queue'] = 'q'
+        if 'redis_client' not in kwargs:
+            kwargs['redis_client'] = DummyRedis()
+        janitor = janitors.RedisJanitor(**kwargs)
         janitor.get_core_v1_client = DummyKubernetes
         return janitor
 
@@ -172,6 +180,20 @@ class TestJanitor(object):
         assert janitor.is_whitelisted('pod1-123-456') is True
         assert janitor.is_whitelisted('pod2-123-456') is True
         assert janitor.is_whitelisted('pod3-123-456') is False
+
+    def test_remove_key_from_queue(self):
+        janitor = self.get_client()
+
+        def dummy_lrem(key, count, value):
+            total = sum(value == k for k in janitor.redis_client.keys)
+            return int(total >= count)
+
+        janitor.redis_client.lrem = dummy_lrem
+        valid_key = janitor.redis_client.keys[0]
+        invalid_key = 'badkey'
+        assert int(janitor.remove_key_from_queue(valid_key)) == 1
+        assert int(janitor.remove_key_from_queue(invalid_key)) == 0
+
 
     def test__udpate_pods(self):
         janitor = self.get_client()
@@ -242,64 +264,72 @@ class TestJanitor(object):
         assert janitor.is_stale_update_time(None) is False
         assert janitor.is_stale_update_time(None, 0) is False
 
-    # def test_is_restart_required(self):
-        # test status stale times
-        # janitor = self.get_client(stale_time=5)
-        # assert janitor.is_restart_required('stale:new') is True
-        # assert janitor.is_restart_required('stale:done') is True
-        # assert janitor.is_restart_required('stale:failed') is True
-        # assert janitor.is_restart_required('stale:working') is True
-        # assert janitor.is_restart_required('goodkey:new') is False
-        # assert janitor.is_restart_required('goodkey:done') is False
-        # assert janitor.is_restart_required('goodkey:failed') is False
-        # # assert janitor.is_restart_required('goodkey:working') is False
-        #
-        # janitor = self.get_client()
-        #
-        # # test status `new`
-        # assert janitor.is_restart_required('predict:new') is False
-        #
-        # # test status `done`
-        # assert janitor.is_restart_required('predict:done') is False
-        #
-        # # test status `failed` without `restart_failures`
-        # janitor = self.get_client(restart_failures=False)
-        # assert janitor.is_restart_required('goodkey:failed') is False
-        # # test status `failed` with `restart_failures` but fresh `updated_at`
-        # janitor = self.get_client(restart_failures=True,
-        #                           failure_stale_seconds=5)
-        # assert janitor.is_restart_required('goodkey:failed') is False
-        # assert janitor.is_restart_required('stalekey:failed') is True
-        #
-        # # test `updated_by` not found in `pods`
-        # # assert janitor.is_restart_required('badhost:inprogress') is False
-        #
-        # # test pod not found
-        # janitor.kill_pod = lambda x, y: True
-        # assert janitor.is_restart_required('badkey:inprogress') is True
-        #
-        # # # test in progress with status != Running
-        # # assert janitor.is_restart_required('goodkey:inprogress') is True
-        #
-        # # test in progress with status = Running with stale update time
-        # assert janitor.is_restart_required('goodkeystale:inprogress') is False
+    def test_get_processing_keys(self):
+        queue = 'test-queue'
+        janitor = self.get_client(queue=queue)
+        assert [x for x in janitor.get_processing_keys()] == []
 
-        # janitor = self.get_client(stale_time=60)
-        # assert janitor.is_restart_required('goodkeystale:inprogress') is True
-        #
-        # # test in progress with status = Running with fresh update time
-        # assert janitor.is_restart_required('goodkey:inprogress') is False
-        #
-        # # test no `updated_at`
-        # assert janitor.is_restart_required('goodmalformed:inprogress') is False
+        janitor.redis_client.keys = [
+            'processing-{q}:{pod}'.format(q=queue, pod=random.randint(0, 100)),
+            'processing-{q}:{pod}'.format(q=queue, pod=random.randint(0, 100)),
+            'processing-{q}:{pod}'.format(q=queue, pod=random.randint(0, 100)),
+            'other key',
+        ]
+        expected = janitor.redis_client.keys[0:3]
+        assert [x for x in janitor.get_processing_keys()] == expected
 
-    def test_clean(self):
+    def test_clean_key(self):
+        janitor = self.get_client(stale_time=5)
+        assert janitor.clean_key('stale:new') is True
+        assert janitor.clean_key('stale:done') is True
+        assert janitor.clean_key('stale:failed') is True
+        assert janitor.clean_key('stale:working') is True
+        assert janitor.clean_key('goodkey:new') is False
+        assert janitor.clean_key('goodkey:done') is False
+        assert janitor.clean_key('goodkey:failed') is False
+        assert janitor.clean_key('goodkey:working') is False
+
         janitor = self.get_client()
 
-        # monkey-patch kubectl commands
-        janitor.kill_pod = lambda x: True
-        janitor._get_all_pods = lambda: 'good_pod status Running'
-        janitor._make_kubectl_call = lambda x: 0
+        # test status `new`
+        assert janitor.clean_key('predict:new') is False
 
-        # run triage_keys
+        # test status `done`
+        assert janitor.clean_key('predict:done') is False
+
+        # test status `failed` without `restart_failures`
+        janitor = self.get_client(restart_failures=False)
+        assert janitor.clean_key('goodkey:failed') is False
+        # test status `failed` with `restart_failures` but fresh `updated_at`
+        janitor = self.get_client(restart_failures=True,
+                                  failure_stale_seconds=5)
+        assert janitor.clean_key('goodkey:failed') is False
+        assert janitor.clean_key('stalekey:failed') is True
+
+        # test `updated_by` in whitelist
+        assert janitor.clean_key('whitelist-stale:inprogress') is True
+
+        janitor = self.get_client(stale_time=60)
+        assert janitor.clean_key('goodkeystale:inprogress') is True
+
+        # test in progress with status = Running with fresh update time
+        assert janitor.clean_key('goodkey:inprogress') is False
+
+        # test no `updated_at`
+        assert janitor.clean_key('goodmalformed:inprogress') is False
+
+    def test_clean(self):
+        queue = 'q'
+        janitor = self.get_client(queue=queue)
+        whitelisted = janitor.whitelisted_pods[0]
+        janitor.redis_client.keys = [
+            'processing-{q}:pod'.format(q=queue),
+            'processing-{q}:{pod}'.format(q=queue, pod=whitelisted),
+            'processing-{q}:pod'.format(q=queue),
+            'other key',
+        ]
+        janitor.clean_key = lambda *x: True
+        janitor.is_whitelisted = lambda x: int(x) % 2 == 0
+        janitor.lrange = []
         janitor.clean()
+        assert janitor.total_repairs == 3 ** 2  # valid keys ** 2
