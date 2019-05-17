@@ -146,8 +146,9 @@ class RedisJanitor(object):
         if is_removed:
             start = timeit.default_timer()
             self.redis_client.lpush(self.queue, redis_key)
-            self.logger.debug('Repaired key `%s` from in %s seconds.',
-                              redis_key, timeit.default_timer() - start)
+            self.logger.debug('Pushed key `%s` to `%s` in %s seconds.',
+                              redis_key, self.queue,
+                              timeit.default_timer() - start)
         return is_removed
 
     def _update_pods(self):
