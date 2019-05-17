@@ -207,8 +207,9 @@ class RedisJanitor(object):
                              ' for longer than `%s` seconds.', key,
                              self.cleaning_queue, key_status, self.stale_time)
         else:
-            self.logger.info('Key `%s` is in queue `%s` but pod `%s` does not'
-                             ' exist.', key, self.cleaning_queue, pod_name)
+            self.logger.info('Key `%s` is in queue `%s` with status `%s` but '
+                             'pod `%s` does not exist.', key,
+                             self.cleaning_queue, key_status, pod_name)
 
         if key_status in {'done', 'failed'}:
             # job is finished, no need to restart the key
