@@ -104,104 +104,122 @@ class RedisJanitor(object):
                           len(response.items), timeit.default_timer() - t)
         return response.items
 
-    def reset_redis_key(self, redis_key):
-        # remove the key from the processing queue, if present
-        self.redis_client.lrem(self.processing_queue, 1, redis_key)
-        # set the status back to `new`
-        self.redis_client.hset(redis_key, 'status', 'new')
-        # push the key back into the work queue
-        self.redis_client.lpush(self.queue, redis_key)
+    def list_namespaced_pod(self):
+        t = timeit.default_timer()
+        try:
+            kube_client = self.get_core_v1_client()
+            response = kube_client.list_namespaced_pod(self.namespace)
+        except kubernetes.client.rest.ApiException as err:
+            self.logger.error('`list_namespaced_pod %s` encountered %s: %s',
+                              self.namespace, type(err).__name__, err)
+            return []
+        self.logger.debug('Found %s pods in namespace `%s` in %s seconds.',
+                          len(response.items), self.namespace,
+                          timeit.default_timer() - t)
+        return response.items
 
-    def triage(self, key, all_pods):
+    def is_whitelisted(self, pod_name):
+        """Ignore missing pods that are whitelisted"""
+        pod_name = str(pod_name)
+        return any(pod_name.startswith(x) for x in self.whitelisted_pods)
+
+    def remove_key_from_queue(self, redis_key):
+        start = timeit.default_timer()
+        self.logger.info('Removing key `%s` from queue `%s`.',
+                         redis_key, self.processing_queue)
+        self.redis_client.lrem(self.processing_queue, 1, redis_key)
+        self.logger.info('Removed key `%s` from queue `%s` in %s seconds.',
+                         redis_key, self.processing_queue,
+                         timeit.default_timer() - start)
+
+    def restart_redis_key(self, redis_key, new_status='new'):
+        start = timeit.default_timer()
+        self.logger.info('Restarting key `%s`.', redis_key)
+        # reset key status
+        self.redis_client.hmset(redis_key, {
+            'status': new_status,
+            'updated_at': datetime.datetime.now(pytz.UTC).isoformat(),
+        })
+        self.remove_key_from_queue(redis_key)  # remove from processing queue
+        self.redis_client.lpush(self.queue, redis_key)  # push to work queue
+        self.logger.info('Restarted key `%s` in %s seconds.',
+                         redis_key, timeit.default_timer() - start)
+
+    def _update_pods(self):
+        """Refresh pod data and update timestamp"""
+        namespaced_pods = self.list_pod_for_all_namespaces()
+        self.pods = {pod.metadata.name: pod for pod in namespaced_pods}
+        self.pods_updated_at = datetime.datetime.now(pytz.UTC)
+
+    def update_pods(self):
+        """Calls `_update_pods` if longer than `pod_refresh_interval`"""
+        if self.pods_updated_at is None:
+            self._update_pods()
+        elif not isinstance(self.pods_updated_at, datetime.datetime):
+            raise ValueError('`update_pods` expected `pods_updated_at` to be'
+                             ' a `datetime.datetime` instance got %s.' %
+                             type(self.pods_updated_at).__name__)
+        else:
+            diff = self.pods_updated_at - datetime.datetime.now(pytz.UTC)
+            if diff.total_seconds() > self.pod_refresh_interval:
+                self._update_pods()
+
+    def is_stale_update_time(self, updated_time, stale_time=None):
+        stale_time = stale_time if stale_time else self.stale_time
+        # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
+        # updated_time = datetime.datetime.fromisoformat(updated_time)
+        if not updated_time:
+            return False
+        if not stale_time > 0:
+            return False
+        if isinstance(updated_time, str):
+            updated_time = dateutil.parser.parse(updated_time)
+        current_time = datetime.datetime.now(pytz.UTC)
+        update_diff = current_time - updated_time
+        return update_diff.total_seconds() >= stale_time
+
+    def clean_key(self, key, queue):
         hvals = self.redis_client.hgetall(key)
+        self.update_pods()
+
         key_status = hvals.get('status')
 
-        if key_status in {'new', 'done'}:
-            # either not started or successuflly completed. no action taken.
+        if not self.is_stale_update_time(hvals.get('updated_at')):
             return False
 
-        # TODO: some failures should be restarted, other not
-        if key_status == 'failed':
-            reset_text = ' Resetting it now.' if self.restart_failures else ''
-            self.logger.info('Key %s failed due to "%s".%s',
-                             key, hvals.get('reason', 'REASON NOT FOUND'),
-                             reset_text)
-            if self.restart_failures:
-                self.reset_redis_key(key)
-            return self.restart_failures
+        # key is stale, must be repaired somehow
+        self.logger.info('Key `%s` has been in queue `%s` with status'
+                         ' `%s` for longer than `%s` seconds.',
+                         key, queue, key_status, self.stale_time)
 
-        # status is not a beginning or ending status,
-        # but is the key actively being processed?
-
-        # is the pod processing this key alive?
-        host = hvals.get('identity_started')
-        if not host:
-            # if the status is not `new`, we would expect there to be that
-            # the host that changed the status would be `identity_started`
-            self.logger.warning('Key `%s` has status `%s` but no value for'
-                                ' `identity_started`.',
-                                key, self.redis_client.hgetall(key))
-            return False
-
-        pod = all_pods.get(host)
-
-        # does the pod that started the key still exist?
-        if not pod:
-            self.logger.info('Key `%s` was started by pod `%s`, but this '
-                             'pod cannot be found. Resetting key.',
-                             key, host)
-            self.reset_redis_key(key)
+        if key_status in {'done', 'failed'}:
+            # if the job is finished, no need to restart the key
+            self.remove_key_from_queue(key)
             return True
 
-        # is the pod still running?
-        if pod.status.phase != 'Running':
-            # we need to make sure it gets killed.
-            # and then reset the status of the job
-            self.logger.info('Pod %s is in status `%s`.  Killing it '
-                             'and then resetting record `%s`.',
-                             host, pod.status.phase, key)
-            self.kill_pod(host, 'deepcell')  # TODO: hardcoded namespace
-            self.reset_redis_key(key)
-            return True
+        # key is in-progress. check `updated_by` for new status value
+        if self.is_whitelisted(hvals.get('updated_by')):
+            new_status = key_status
+        else:
+            new_status = 'new'
 
-        # has the key's status been updated in the last N seconds?
-        try:
-            updated_time = hvals.get('updated_at')
-            # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
-            # updated_time = datetime.datetime.fromisoformat(updated_time)
-            updated_time = dateutil.parser.parse(updated_time)
-            current_time = datetime.datetime.now(pytz.UTC)
-            update_diff = current_time - updated_time
-        except (TypeError, ValueError):
-            self.logger.info('Key `%s` has status `%s` but has no '
-                             '`updated_at` field.', key, key_status)
-            return False
+        # if the job is finished, no need to restart the key
+        self.restart_redis_key(key, new_status)
+        return True
 
-        if update_diff.total_seconds() >= self.stale_time > 0:
-            # This entry has not been updated in at least `timeout_seconds`
-            # Assume it has died, and reset the status
-            self.logger.info('Key `%s` has not been updated in %s seconds, '
-                             'which is longer than %s seconds. Resetting it '
-                             'now.', key, update_diff, self.stale_time)
-            self.reset_redis_key(key)
-            return True
+    def clean(self):
+        cleaned = 0
 
-        return False
+        processing_keys = self.redis_client.scan_iter(
+            match='{}:*'.format(self.processing_queue),
+            count=100)
 
-    def triage_keys(self):
-        repairs = 0
-        pods = self.list_pod_for_all_namespaces()
-        pod_dict = {p.metadata.name: p for p in pods}
-        self.logger.info('Found %s pods.', len(pods))
+        for q in processing_keys:
+            for key in self.redis_client.lrange(q, 0, -1):
+                is_key_cleaned = self.clean_key(key, q)
+                cleaned = cleaned + int(is_key_cleaned)
 
-        for key in self.redis_client.scan_iter(count=1000):
-            if self.redis_client.type(key) == 'hash':
-                key_repaired = self.triage(key, pod_dict)
-                num_repaired = int(key_repaired)
-                repairs += num_repaired
-                self._repairs += num_repaired
-                if num_repaired:
-                    self.logger.info('Repaired key: `%s`.', key)
-
-        self.logger.info('Repaired %s keys (%s total).',
-                         repairs, self._repairs)
+        if cleaned:  # loop is finished, summary log
+            self.total_repairs += cleaned
+            self.logger.info('Repaired %s keys (%s total).',
+                             cleaned, self.total_repairs)
