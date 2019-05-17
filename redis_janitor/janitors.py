@@ -198,6 +198,9 @@ class RedisJanitor(object):
         if not is_stale:
             return False
 
+        self.logger.info('Key `%s` in queue `%s` was last updated at `%s`.',
+                         key, self.cleaning_queue, hvals.get('updated_at'))
+
         key_status = hvals.get('status')
 
         # key is stale, must be repaired somehow
