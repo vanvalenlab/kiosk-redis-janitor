@@ -58,7 +58,7 @@ class RedisJanitor(object):
         self.restart_failures = restart_failures
         self.failure_stale_seconds = failure_stale_seconds
         self.pod_refresh_interval = int(pod_refresh_interval)
-        self.cleaning_queue = None  # update this in clean()
+        self.cleaning_queue = ''  # update this in clean()
 
         # empty initializers, update them with _update_pods
         self.pods = {}
@@ -219,7 +219,10 @@ class RedisJanitor(object):
 
         for q in self.get_processing_keys(count=100):
             self.cleaning_queue = q  # just for logging
-            for key in self.redis_client.lrange(q, 0, -1):
+            for i, key in enumerate(self.redis_client.lrange(q, 0, -1)):
+                if i >= 1:
+                    self.logger.warning('Queue `%s` has an item with index %s.'
+                                        ' This is strange.', q, i)
                 is_key_cleaned = self.clean_key(key)
                 cleaned = cleaned + int(is_key_cleaned)
 
