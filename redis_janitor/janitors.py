@@ -166,6 +166,10 @@ class RedisJanitor(object):
             if diff.total_seconds() > self.pod_refresh_interval:
                 self._update_pods()
 
+    def is_valid_pod(self, pod_name):
+        self.update_pods()  # only updates if stale
+        return pod_name in self.pods
+
     def is_stale_update_time(self, updated_time, stale_time=None):
         stale_time = stale_time if stale_time else self.stale_time
         # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
@@ -182,17 +186,24 @@ class RedisJanitor(object):
 
     def clean_key(self, key):
         hvals = self.redis_client.hgetall(key)
-        self.update_pods()
+
+        pod_name = self.cleaning_queue.split(':')[-1]
+        is_valid_pod = self.is_valid_pod(pod_name)
+        is_stale = self.is_stale_update_time(hvals.get('updated_at'))
+
+        if is_valid_pod and not is_stale:
+            return False
 
         key_status = hvals.get('status')
 
-        if not self.is_stale_update_time(hvals.get('updated_at')):
-            return False
-
         # key is stale, must be repaired somehow
-        self.logger.info('Key `%s` has been in queue `%s` with status `%s` for'
-                         ' longer than `%s` seconds.', key,
-                         self.cleaning_queue, key_status, self.stale_time)
+        if is_stale:
+            self.logger.info('Key `%s` has been in queue `%s` with status `%s`'
+                             ' for longer than `%s` seconds.', key,
+                             self.cleaning_queue, key_status, self.stale_time)
+        else:
+            self.logger.info('Key `%s` is in queue `%s` but pod `%s` does not'
+                             'exist.', key, self.cleaning_queue, pod_name)
 
         if key_status in {'done', 'failed'}:
             # job is finished, no need to restart the key

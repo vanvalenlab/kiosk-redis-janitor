@@ -277,8 +277,14 @@ class TestJanitor(object):
         expected = janitor.redis_client.keys[0:3]
         assert [x for x in janitor.get_processing_keys()] == expected
 
+    def test_is_valid_pod(self):
+        janitor = self.get_client(stale_time=5)
+        assert janitor.is_valid_pod('pod') is True  # valid pod name
+        assert janitor.is_valid_pod('missing') is False
+
     def test_clean_key(self):
         janitor = self.get_client(stale_time=5)
+        janitor.cleaning_queue = 'processing-q:pod'
         assert janitor.clean_key('stale:new') is True
         assert janitor.clean_key('stale:done') is True
         assert janitor.clean_key('stale:failed') is True
@@ -287,8 +293,11 @@ class TestJanitor(object):
         assert janitor.clean_key('goodkey:done') is False
         assert janitor.clean_key('goodkey:failed') is False
         assert janitor.clean_key('goodkey:working') is False
+        janitor.cleaning_queue = 'processing-q:missing'
+        assert janitor.clean_key('goodkey:working') is True
 
         janitor = self.get_client()
+        janitor.cleaning_queue = 'processing-q:pod'
 
         # test status `new`
         assert janitor.clean_key('predict:new') is False
@@ -298,10 +307,12 @@ class TestJanitor(object):
 
         # test status `failed` without `restart_failures`
         janitor = self.get_client(restart_failures=False)
+        janitor.cleaning_queue = 'processing-q:pod'
         assert janitor.clean_key('goodkey:failed') is False
         # test status `failed` with `restart_failures` but fresh `updated_at`
         janitor = self.get_client(restart_failures=True,
                                   failure_stale_seconds=5)
+        janitor.cleaning_queue = 'processing-q:pod'
         assert janitor.clean_key('goodkey:failed') is False
         assert janitor.clean_key('stalekey:failed') is True
 
@@ -309,6 +320,7 @@ class TestJanitor(object):
         assert janitor.clean_key('whitelist-stale:inprogress') is True
 
         janitor = self.get_client(stale_time=60)
+        janitor.cleaning_queue = 'processing-q:pod'
         assert janitor.clean_key('goodkeystale:inprogress') is True
 
         # test in progress with status = Running with fresh update time
