@@ -30,14 +30,31 @@ from __future__ import print_function
 import os
 import sys
 import time
+import signal
 import logging
-import traceback
 import logging.handlers
-
-import redis
-import kubernetes
+import traceback
 
 import redis_janitor
+
+
+class GracefulDeath:
+    """Catch signals to allow graceful shutdown.
+
+    Adapted from: https://stackoverflow.com/questions/18499497
+    """
+
+    def __init__(self):
+        self.signum = None
+        self.kill_now = False
+        self.logger = logging.getLogger(str(self.__class__.__name__))
+        signal.signal(signal.SIGINT, self.handle_signal)
+        signal.signal(signal.SIGTERM, self.handle_signal)
+
+    def handle_signal(self, signum, frame):  # pylint: disable=unused-argument
+        self.signum = signum
+        self.kill_now = True
+        self.logger.debug('Received signal `%s` and frame `%s`', signum, frame)
 
 
 def initialize_logger(debug_mode=True):
@@ -67,10 +84,14 @@ def initialize_logger(debug_mode=True):
 
 
 if __name__ == '__main__':
+    initialize_logger(os.getenv('DEBUG'))
+
     INTERVAL = int(os.getenv('INTERVAL', '20'))
     QUEUE = os.getenv('QUEUE', 'predict')
+    STALE_TIME = os.getenv('STALE_TIME', '0')
+    RESTART_FAILURES = os.getenv('RESTART_FAILURES', 'false').lower() == 'true'
 
-    initialize_logger(os.getenv('DEBUG'))
+    sighandler = GracefulDeath()
 
     _logger = logging.getLogger(__file__)
 
@@ -78,11 +99,17 @@ if __name__ == '__main__':
         os.getenv('REDIS_HOST'),
         os.getenv('REDIS_PORT'))
 
-    janitor = redis_janitor.RedisJanitor(redis_client=REDIS, queue=QUEUE)
+    janitor = redis_janitor.RedisJanitor(
+        redis_client=REDIS,
+        queue=QUEUE,
+        stale_time=STALE_TIME,
+        restart_failures=RESTART_FAILURES)
 
     while True:
         try:
-            janitor.triage_keys()
+            janitor.clean()
+            if sighandler.kill_now:
+                break
             _logger.debug('Sleeping for %s seconds.', INTERVAL)
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
