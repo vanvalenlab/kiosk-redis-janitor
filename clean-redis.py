@@ -88,7 +88,7 @@ if __name__ == '__main__':
 
     INTERVAL = int(os.getenv('INTERVAL', '20'))
     QUEUE = os.getenv('QUEUE', 'predict')
-    STALE_TIME = os.getenv('STALE_TIME', '0')
+    STALE_TIME = os.getenv('STALE_TIME', '600')
     RESTART_FAILURES = os.getenv('RESTART_FAILURES', 'false').lower() == 'true'
 
     sighandler = GracefulDeath()
