@@ -329,6 +329,14 @@ class TestJanitor(object):
         # test no `updated_at`
         assert janitor.clean_key('goodmalformed:inprogress') is False
 
+        # test pod is not found
+        janitor.cleaning_queue = 'processing-q:bad'
+        assert janitor.clean_key('goodkey:inprogress') is True
+
+        # test pod is not found and stale
+        janitor.cleaning_queue = 'processing-q:bad'
+        assert janitor.clean_key('stalekey:inprogress') is True
+
     def test_clean(self):
         queue = 'q'
         janitor = self.get_client(queue=queue)
