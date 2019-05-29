@@ -166,7 +166,7 @@ class RedisJanitor(object):
                              ' a `datetime.datetime` instance got %s.' %
                              type(self.pods_updated_at).__name__)
         else:
-            diff = self.pods_updated_at - datetime.datetime.now(pytz.UTC)
+            diff = datetime.datetime.now(pytz.UTC) - self.pods_updated_at
             if diff.total_seconds() > self.pod_refresh_interval:
                 self._update_pods()
 
