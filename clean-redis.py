@@ -105,12 +105,13 @@ if __name__ == '__main__':
         stale_time=STALE_TIME,
         restart_failures=RESTART_FAILURES)
 
+    _logger.info('Janitor Initialized.')
+
     while True:
         try:
             janitor.clean()
             if sighandler.kill_now:
                 break
-            _logger.debug('Sleeping for %s seconds.', INTERVAL)
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
