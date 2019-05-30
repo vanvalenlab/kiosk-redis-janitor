@@ -83,8 +83,8 @@ if __name__ == '__main__':
         stale_time=STALE_TIME)
 
     _logger.info('Janitor initialized. '
-                 'Cleaning queue `%s` every `%s` seconds.',
-                 QUEUE, INTERVAL)
+                 'Cleaning queues `%s` and `%s:*` every `%s` seconds.',
+                 janitor.queue, janitor.processing_queue, INTERVAL)
 
     while True:
         try:
