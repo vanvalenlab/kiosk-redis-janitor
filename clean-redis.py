@@ -35,8 +35,9 @@ import logging
 import logging.handlers
 import traceback
 
-import redis_janitor
+import decouple
 
+import redis_janitor
 
 
 def initialize_logger(debug_mode=True):
@@ -66,18 +67,17 @@ def initialize_logger(debug_mode=True):
 
 
 if __name__ == '__main__':
-    initialize_logger(os.getenv('DEBUG'))
+    initialize_logger(decouple.config('DEBUG', default=True, cast=bool))
 
-    INTERVAL = int(os.getenv('INTERVAL', '20'))
-    QUEUE = os.getenv('QUEUE', 'predict')
-    STALE_TIME = os.getenv('STALE_TIME', '600')
-
+    INTERVAL = decouple.config('INTERVAL', default=20, cast=int)
+    QUEUE = decouple.config('QUEUE', default='predict')
+    STALE_TIME = decouple.config('STALE_TIME', default='600', cast=int)
 
     _logger = logging.getLogger(__file__)
 
     REDIS = redis_janitor.redis.RedisClient(
-        os.getenv('REDIS_HOST'),
-        os.getenv('REDIS_PORT'))
+        decouple.config('REDIS_HOST'),
+        decouple.config('REDIS_PORT'))
 
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
