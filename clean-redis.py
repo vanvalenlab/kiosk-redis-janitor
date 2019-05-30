@@ -29,7 +29,6 @@ from __future__ import print_function
 
 import logging
 import logging.handlers
-import signal
 import sys
 import time
 import traceback
