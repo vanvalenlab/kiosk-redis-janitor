@@ -71,7 +71,6 @@ if __name__ == '__main__':
     INTERVAL = int(os.getenv('INTERVAL', '20'))
     QUEUE = os.getenv('QUEUE', 'predict')
     STALE_TIME = os.getenv('STALE_TIME', '600')
-    RESTART_FAILURES = os.getenv('RESTART_FAILURES', 'false').lower() == 'true'
 
 
     _logger = logging.getLogger(__file__)
@@ -83,8 +82,7 @@ if __name__ == '__main__':
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
         queue=QUEUE,
-        stale_time=STALE_TIME,
-        restart_failures=RESTART_FAILURES)
+        stale_time=STALE_TIME)
 
     _logger.info('Janitor Initialized.')
 
