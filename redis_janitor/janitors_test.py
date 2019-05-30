@@ -305,20 +305,6 @@ class TestJanitor(object):
         # test status `done`
         assert janitor.clean_key('predict:done') is False
 
-        # test status `failed` without `restart_failures`
-        janitor = self.get_client(restart_failures=False)
-        janitor.cleaning_queue = 'processing-q:pod'
-        assert janitor.clean_key('goodkey:failed') is False
-        # test status `failed` with `restart_failures` but fresh `updated_at`
-        janitor = self.get_client(restart_failures=True,
-                                  failure_stale_seconds=5)
-        janitor.cleaning_queue = 'processing-q:pod'
-        assert janitor.clean_key('goodkey:failed') is False
-        assert janitor.clean_key('stalekey:failed') is True
-
-        # test `updated_by` in whitelist
-        assert janitor.clean_key('whitelist-stale:inprogress') is True
-
         janitor = self.get_client(stale_time=60)
         janitor.cleaning_queue = 'processing-q:pod'
         assert janitor.clean_key('goodkeystale:inprogress') is True
