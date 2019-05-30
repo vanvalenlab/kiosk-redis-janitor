@@ -74,8 +74,8 @@ if __name__ == '__main__':
     _logger = logging.getLogger(__file__)
 
     REDIS = redis_janitor.redis.RedisClient(
-        decouple.config('REDIS_HOST'),
-        decouple.config('REDIS_PORT'))
+        decouple.config('REDIS_HOST', default='redis-master'),
+        decouple.config('REDIS_PORT', default=6379, cast=int))
 
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
