@@ -46,7 +46,6 @@ class RedisJanitor(object):
                  namespace='default',
                  backoff=3,
                  stale_time=600,  # 10 minutes
-                 restart_failures=False,
                  failure_stale_seconds=60,
                  pod_refresh_interval=5,):
         self.redis_client = redis_client
@@ -55,7 +54,6 @@ class RedisJanitor(object):
         self.queue = str(queue).lower()
         self.namespace = namespace
         self.stale_time = int(stale_time)
-        self.restart_failures = restart_failures
         self.failure_stale_seconds = failure_stale_seconds
         self.pod_refresh_interval = int(pod_refresh_interval)
 
@@ -166,7 +164,7 @@ class RedisJanitor(object):
                              ' a `datetime.datetime` instance got %s.' %
                              type(self.pods_updated_at).__name__)
         else:
-            diff = self.pods_updated_at - datetime.datetime.now(pytz.UTC)
+            diff = datetime.datetime.now(pytz.UTC) - self.pods_updated_at
             if diff.total_seconds() > self.pod_refresh_interval:
                 self._update_pods()
 
@@ -192,15 +190,31 @@ class RedisJanitor(object):
     def clean_key(self, key):
         hvals = self.redis_client.hgetall(key)
 
-        # is_valid_pod = self.is_valid_pod(self.cleaning_queue.split(':')[-1])
+        pod_name = self.cleaning_queue.split(':')[-1]
+
+        is_valid_pod = self.is_valid_pod(pod_name)
         is_stale = self.is_stale_update_time(hvals.get('updated_at'))
 
-        # if is_valid_pod and not is_stale:
-        if not is_stale:
+        if is_valid_pod and not is_stale:  # pylint: disable=R1705
             return False
 
-        self.logger.info('Key `%s` in queue `%s` was last updated at `%s`.',
-                         key, self.cleaning_queue, hvals.get('updated_at'))
+        elif is_stale and not is_valid_pod:
+            self.logger.warning('Key `%s` in queue `%s` was last updated at '
+                                '`%s` and pod `%s` is still alive.',
+                                key, self.cleaning_queue,
+                                hvals.get('updated_at'), pod_name)
+            # self.kill_pod(pod_name, self.namespace)
+
+        elif not is_stale and not is_valid_pod:
+            self.logger.info('Key `%s` in queue `%s` was last updated by pod '
+                             '`%s`, but that pod does not exist.',
+                             key, self.cleaning_queue, pod_name)
+
+        else:
+            self.logger.info('Key `%s` in queue `%s` was last updated at `%s` '
+                             'by pod `%s` which no longer exists.',
+                             key, self.cleaning_queue,
+                             hvals.get('updated_at'), pod_name)
 
         key_status = hvals.get('status')
 

@@ -27,34 +27,15 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
-import sys
-import time
-import signal
 import logging
 import logging.handlers
+import sys
+import time
 import traceback
 
+import decouple
+
 import redis_janitor
-
-
-class GracefulDeath:
-    """Catch signals to allow graceful shutdown.
-
-    Adapted from: https://stackoverflow.com/questions/18499497
-    """
-
-    def __init__(self):
-        self.signum = None
-        self.kill_now = False
-        self.logger = logging.getLogger(str(self.__class__.__name__))
-        signal.signal(signal.SIGINT, self.handle_signal)
-        signal.signal(signal.SIGTERM, self.handle_signal)
-
-    def handle_signal(self, signum, frame):  # pylint: disable=unused-argument
-        self.signum = signum
-        self.kill_now = True
-        self.logger.debug('Received signal `%s` and frame `%s`', signum, frame)
 
 
 def initialize_logger(debug_mode=True):
@@ -84,33 +65,30 @@ def initialize_logger(debug_mode=True):
 
 
 if __name__ == '__main__':
-    initialize_logger(os.getenv('DEBUG'))
+    initialize_logger(decouple.config('DEBUG', default=True, cast=bool))
 
-    INTERVAL = int(os.getenv('INTERVAL', '20'))
-    QUEUE = os.getenv('QUEUE', 'predict')
-    STALE_TIME = os.getenv('STALE_TIME', '600')
-    RESTART_FAILURES = os.getenv('RESTART_FAILURES', 'false').lower() == 'true'
-
-    sighandler = GracefulDeath()
+    INTERVAL = decouple.config('INTERVAL', default=20, cast=int)
+    QUEUE = decouple.config('QUEUE', default='predict')
+    STALE_TIME = decouple.config('STALE_TIME', default='600', cast=int)
 
     _logger = logging.getLogger(__file__)
 
     REDIS = redis_janitor.redis.RedisClient(
-        os.getenv('REDIS_HOST'),
-        os.getenv('REDIS_PORT'))
+        decouple.config('REDIS_HOST', default='redis-master'),
+        decouple.config('REDIS_PORT', default=6379, cast=int))
 
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
         queue=QUEUE,
-        stale_time=STALE_TIME,
-        restart_failures=RESTART_FAILURES)
+        stale_time=STALE_TIME)
+
+    _logger.info('Janitor initialized. '
+                 'Cleaning queues `%s` and `%s:*` every `%s` seconds.',
+                 janitor.queue, janitor.processing_queue, INTERVAL)
 
     while True:
         try:
             janitor.clean()
-            if sighandler.kill_now:
-                break
-            _logger.debug('Sleeping for %s seconds.', INTERVAL)
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
