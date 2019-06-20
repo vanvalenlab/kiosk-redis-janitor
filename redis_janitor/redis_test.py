@@ -36,15 +36,32 @@ import pytest
 import redis_janitor
 
 
+class ConnectionPool(object):
+
+    def reset(self, *_, **__):
+        pass
+
+
 class DummyRedis(object):
-    def __init__(self, fail_tolerance=0, hard_fail=False):
+
+    def __init__(self, fail_tolerance=0, hard_fail=False, read_only=False):
         self.fail_count = 0
         self.fail_tolerance = fail_tolerance
         self.hard_fail = hard_fail
+        self.read_only = read_only
+        self.reset_count = 0
+        self.connection_pool = ConnectionPool()
+        self.connection_pool.reset = self._incr_reset
+
+    def _incr_reset(self):
+        self.reset_count += 1
 
     def get_fail_count(self):
         if self.hard_fail:
             raise AssertionError('thrown on purpose')
+        if self.read_only and self.fail_count < self.fail_tolerance:
+            self.fail_count += 1
+            raise redis.exceptions.ReadOnlyError('READONLYERROR')
         if self.fail_count < self.fail_tolerance:
             self.fail_count += 1
             raise redis.exceptions.ConnectionError('thrown on purpose')
@@ -78,3 +95,13 @@ class TestRedis(object):
         client = RedisClient(host='host', port='port', backoff=0)
         with pytest.raises(AssertionError):
             client.get_fail_count()
+
+        # test READONLYERROR will reset the connection and retry
+        def _get_read_only_client(*args, **kwargs):  # pylint: disable=W0613
+            return DummyRedis(fail_tolerance=fails, read_only=True)
+
+        RedisClient._get_redis_client = _get_read_only_client
+
+        client = RedisClient(host='host', port='port', backoff=0)
+        assert client.get_fail_count() == fails
+        assert client._redis.reset_count == fails  # pylint: disable=E1101
