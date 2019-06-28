@@ -83,7 +83,7 @@ if __name__ == '__main__':
     for queue in set(QUEUE.split(QUEUE_DELIMITER)):
         janitor = redis_janitor.RedisJanitor(
             redis_client=REDIS,
-            queue=QUEUE,
+            queue=queue,
             stale_time=STALE_TIME)
 
         all_janitors[queue] = janitor
