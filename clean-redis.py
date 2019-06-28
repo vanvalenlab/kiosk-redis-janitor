@@ -70,6 +70,7 @@ if __name__ == '__main__':
     INTERVAL = decouple.config('INTERVAL', default=20, cast=int)
     QUEUE = decouple.config('QUEUE', default='predict')
     STALE_TIME = decouple.config('STALE_TIME', default='600', cast=int)
+    QUEUE_DELIMITER = decouple.config('QUEUE_DELIMITER', default=',')
 
     _logger = logging.getLogger(__file__)
 
@@ -77,18 +78,24 @@ if __name__ == '__main__':
         decouple.config('REDIS_HOST', default='redis-master'),
         decouple.config('REDIS_PORT', default=6379, cast=int))
 
-    janitor = redis_janitor.RedisJanitor(
-        redis_client=REDIS,
-        queue=QUEUE,
-        stale_time=STALE_TIME)
+    all_janitors = {}
 
-    _logger.info('Janitor initialized. '
-                 'Cleaning queues `%s` and `%s:*` every `%s` seconds.',
-                 janitor.queue, janitor.processing_queue, INTERVAL)
+    for queue in set(QUEUE.split(QUEUE_DELIMITER)):
+        janitor = redis_janitor.RedisJanitor(
+            redis_client=REDIS,
+            queue=QUEUE,
+            stale_time=STALE_TIME)
+
+        all_janitors[queue] = janitor
+
+        _logger.info('Janitors initialized. '
+                     'Cleaning queues `%s` and `%s:*` every `%s` seconds.',
+                     janitor.queue, janitor.processing_queue, INTERVAL)
 
     while True:
         try:
-            janitor.clean()
+            for q, j in all_janitors.items():
+                j.clean()
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
