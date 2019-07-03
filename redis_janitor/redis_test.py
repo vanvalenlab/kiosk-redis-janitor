@@ -50,12 +50,19 @@ class DummyRedis(object):
             raise redis.exceptions.ConnectionError('thrown on purpose')
         return self.fail_count
 
+    def sentinel_masters(self):
+        return {'mymaster': {'ip': 'master', 'port': 6379}}
+
+    def sentinel_slaves(self, _):
+        n = random.randint(1, 4)
+        return [{'ip': 'slave', 'port': 6379} for i in range(n)]
+
 
 class TestRedis(object):
 
     def test_redis_client(self):  # pylint: disable=R0201
         fails = random.randint(1, 3)
-        RedisClient = redis_janitor.redis.RedisClient
+        RedisClient = redis_consumer.redis.RedisClient
 
         # monkey patch _get_redis_client function to use DummyRedis client
         def _get_redis_client(*args, **kwargs):  # pylint: disable=W0613
