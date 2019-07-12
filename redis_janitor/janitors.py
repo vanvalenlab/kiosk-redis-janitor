@@ -195,7 +195,12 @@ class RedisJanitor(object):
         return update_diff.total_seconds() >= stale_time
 
     def clean_key(self, key):
-        hvals = self.redis_client.hgetall(key)
+        required_keys = [
+            'status',
+            'updated_at',
+        ]
+        res = self.redis_client.hmget(key, *required_keys)
+        hvals = {k: v for k, v in zip(required_keys, res)}
 
         pod_name = self.cleaning_queue.split(':')[-1]
 

@@ -59,6 +59,22 @@ class DummyRedis(object):
             '{}:{}:{}'.format('other', self.status, 'x.zip'),
         ]
 
+    def _get_dummy_data(self, rhash, identity, updated):
+        return {
+            'model_name': 'model',
+            'model_version': '0',
+            'field': '61',
+            'cuts': '0',
+            'updated_by': identity,
+            'status': rhash.split(':')[-1],
+            'postprocess_function': '',
+            'preprocess_function': '',
+            'file_name': rhash.split(':')[-1],
+            'input_file_name': rhash.split(':')[-1],
+            'output_file_name': rhash.split(':')[-1],
+            'updated_at': updated,
+        }
+
     def scan_iter(self, match=None, count=None):
         for k in self.keys:
             if match:
@@ -82,6 +98,16 @@ class DummyRedis(object):
     def lrange(self, queue, start, end):
         return self.keys[start:end]
 
+    def hmget(self, rhash, *keys):
+        now = datetime.datetime.now(pytz.UTC)
+        later = (now - datetime.timedelta(minutes=60))
+        identity = 'good_pod' if 'good' in rhash else 'bad_pod'
+        identity = 'zip-consumer' if 'whitelist' in rhash else identity
+        updated = (later if 'stale' in rhash else now).isoformat(' ')
+        updated = None if 'malformed' in rhash else updated
+        dummy = self._get_dummy_data(rhash, identity, updated)
+        return [dummy.get(k) for k in keys]
+
     def hgetall(self, rhash):
         now = datetime.datetime.now(pytz.UTC)
         later = (now - datetime.timedelta(minutes=60))
@@ -89,20 +115,8 @@ class DummyRedis(object):
         identity = 'zip-consumer' if 'whitelist' in rhash else identity
         updated = (later if 'stale' in rhash else now).isoformat(' ')
         updated = None if 'malformed' in rhash else updated
-        return {
-            'model_name': 'model',
-            'model_version': '0',
-            'field': '61',
-            'cuts': '0',
-            'updated_by': identity,
-            'status': rhash.split(':')[-1],
-            'postprocess_function': '',
-            'preprocess_function': '',
-            'file_name': rhash.split(':')[-1],
-            'input_file_name': rhash.split(':')[-1],
-            'output_file_name': rhash.split(':')[-1],
-            'updated_at': updated,
-        }
+        dummy = self._get_dummy_data(rhash, identity, updated)
+        return dummy
 
     def type(self, key):
         return 'hash'
