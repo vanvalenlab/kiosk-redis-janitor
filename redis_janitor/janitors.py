@@ -148,7 +148,9 @@ class RedisJanitor(object):
         is_removed = self.remove_key_from_queue(redis_key)
         if is_removed:
             start = timeit.default_timer()
-            self.redis_client.lpush(self.queue, redis_key)
+            source_queue = self.cleaning_queue.split(':')[0]
+            source_queue = source_queue.split('processing-')[-1]
+            self.redis_client.lpush(source_queue, redis_key)
             self.logger.debug('Pushed key `%s` to `%s` in %s seconds.',
                               redis_key, self.queue,
                               timeit.default_timer() - start)
