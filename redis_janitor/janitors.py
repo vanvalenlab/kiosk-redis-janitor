@@ -152,7 +152,7 @@ class RedisJanitor(object):
             source_queue = source_queue.split('processing-')[-1]
             self.redis_client.lpush(source_queue, redis_key)
             self.logger.debug('Pushed key `%s` to `%s` in %s seconds.',
-                              redis_key, self.queue,
+                              redis_key, source_queue,
                               timeit.default_timer() - start)
         return is_removed
 
