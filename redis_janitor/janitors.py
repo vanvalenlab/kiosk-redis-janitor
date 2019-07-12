@@ -66,7 +66,10 @@ class RedisJanitor(object):
         self.valid_pod_phases = {'Running', 'Pending'}
 
         self.total_repairs = 0
-        self.processing_queue = 'processing-{}'.format(self.queue)
+        self.processing_queues = [
+            'processing-{}'.format(self.queue),
+            'processing-{}-zip'.format(self.queue)
+        ]
         self.cleaning_queue = ''  # update this in clean()
 
     def get_core_v1_client(self):
@@ -118,9 +121,11 @@ class RedisJanitor(object):
         return response.items
 
     def get_processing_keys(self, count=100):
-        match = '{}:*'.format(self.processing_queue)
-        processing_keys = self.redis_client.scan_iter(match=match, count=count)
-        return processing_keys
+        for q in self.processing_queues:
+            match = '{}:*'.format(q)
+            keys = self.redis_client.scan_iter(match=match, count=count)
+            for key in keys:
+                yield key
 
     def is_whitelisted(self, pod_name):
         """Ignore missing pods that are whitelisted"""
