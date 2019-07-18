@@ -63,7 +63,11 @@ class RedisJanitor(object):
 
         # attributes for managing pod state
         self.whitelisted_pods = ['zip-consumer']
-        self.valid_pod_phases = {'Running', 'Pending'}
+        self.valid_pod_phases = {
+            'Running',
+            # 'Pending',
+            # 'ContainerCreating'
+        }
 
         self.total_repairs = 0
         self.processing_queues = [
@@ -177,7 +181,11 @@ class RedisJanitor(object):
 
     def is_valid_pod(self, pod_name):
         self.update_pods()  # only updates if stale
-        is_valid = pod_name in self.pods
+        is_valid = False
+        if pod_name in self.pods:
+            pod_phase = self.pods[pod_name].status.phase
+            if pod_phase in self.valid_pod_phases:
+                is_valid = True
         return is_valid
 
     def is_stale_update_time(self, updated_time, stale_time=None):
