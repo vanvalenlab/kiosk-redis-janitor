@@ -140,7 +140,7 @@ class RedisJanitor(object):
         start = timeit.default_timer()
         res = self.redis_client.lrem(self.cleaning_queue, 1, redis_key)
         if res:
-            self.logger.debug('Removed key `%s` from %s` in %s seconds.',
+            self.logger.debug('Removed key `%s` from `%s` in %s seconds.',
                               redis_key, self.cleaning_queue,
                               timeit.default_timer() - start)
         else:
@@ -158,6 +158,9 @@ class RedisJanitor(object):
             self.logger.debug('Pushed key `%s` to `%s` in %s seconds.',
                               redis_key, source_queue,
                               timeit.default_timer() - start)
+        else:
+            self.logger.warning('Tried to repair key %s but it was no longer '
+                                'in %s', redis_key, self.cleaning_queue)
         return is_removed
 
     def _update_pods(self):
