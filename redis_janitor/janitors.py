@@ -248,7 +248,6 @@ class RedisJanitor(object):
                              updated_seconds, self.pods[pod_name].status.phase)
         return True
 
-
     def clean_key(self, key):
         required_keys = [
             'status',
