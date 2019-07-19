@@ -191,63 +191,85 @@ class RedisJanitor(object):
                 is_valid = True
         return is_valid
 
+    def _timestamp_to_age(self, ts):
+        if ts is None:
+            return 0  # key is new
+
+        if isinstance(ts, str):
+            # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
+            # ts = datetime.datetime.fromisoformat(ts)
+            ts = dateutil.parser.parse(ts)
+        current_time = datetime.datetime.now(pytz.UTC)
+        diff = current_time - ts
+        return diff.total_seconds()
+
     def is_stale_update_time(self, updated_time, stale_time=None):
         stale_time = stale_time if stale_time else self.stale_time
         if not updated_time:
             return False
         if not stale_time > 0:
             return False
-        if isinstance(updated_time, str):
-            # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
-            # updated_time = datetime.datetime.fromisoformat(updated_time)
-            updated_time = dateutil.parser.parse(updated_time)
-        current_time = datetime.datetime.now(pytz.UTC)
-        update_diff = current_time - updated_time
-        return update_diff.total_seconds() >= stale_time
+        last_updated = self._timestamp_to_age(updated_time)
+        return last_updated >= stale_time
+
+    def should_clean_key(self, key, updated_ts):
+        """Return a boolean if the key should be cleaned"""
+        pod_name = self.cleaning_queue.split(':')[-1]
+
+        updated_seconds = self._timestamp_to_age(updated_ts)
+
+        if updated_seconds <= self.pod_refresh_interval * 3:
+            return False  # this is too fresh for our pod data
+
+        if self.is_valid_pod(pod_name):  # pod exists in a valid state
+            if not self.is_stale_update_time(updated_ts):
+                return False  # pod exists and key is updated recently
+
+            # pod exists but key is stale
+            self.logger.warning('Key `%s` in queue `%s` was last updated at '
+                                '`%s` (%s seconds ago) and pod `%s` is still '
+                                'alive with status %s but is_stale turned off.',
+                                key, self.cleaning_queue, updated_ts,
+                                updated_seconds, pod_name,
+                                self.pods[pod_name].status.phase)
+            # self.kill_pod(pod_name, self.namespace)
+            return False
+
+        # pod is not valid
+        if pod_name not in self.pods:  # pod does not exist
+            self.logger.info('Key `%s` in queue `%s` was last updated by pod '
+                             '`%s` %s seconds ago, but that pod does not '
+                             'exist.', key, self.cleaning_queue, pod_name,
+                             updated_seconds)
+        else:  # pod exists but has a bad status
+            self.logger.info('Key `%s` in queue `%s` was last updated by '
+                             'pod `%s` %s seconds ago, but that pod has status'
+                             ' %s.', key, self.cleaning_queue, pod_name,
+                             updated_seconds, self.pods[pod_name].status.phase)
+        return True
+
 
     def clean_key(self, key):
         required_keys = [
             'status',
             'updated_at',
+            'updated_by',
         ]
         res = self.redis_client.hmget(key, *required_keys)
         hvals = {k: v for k, v in zip(required_keys, res)}
 
-        pod_name = self.cleaning_queue.split(':')[-1]
+        should_clean = self.should_clean_key(key, hvals.get('updated_at'))
 
-        is_valid_pod = self.is_valid_pod(pod_name)
-        is_stale = self.is_stale_update_time(hvals.get('updated_at'))
+        if should_clean:
+            # key in the processing queue is either stranded or stale
+            # if the key is finished already, just remove it from the queue
+            if hvals.get('status') in {'done', 'failed'}:
+                return bool(self.remove_key_from_queue(key))
 
-        if is_valid_pod and not is_stale:  # pylint: disable=R1705
-            return False
+            # if the job is not finished, repair the key
+            return bool(self.repair_redis_key(key))
 
-        elif is_stale and not is_valid_pod:
-            self.logger.warning('Key `%s` in queue `%s` was last updated at '
-                                '`%s` and pod `%s` is still alive.',
-                                key, self.cleaning_queue,
-                                hvals.get('updated_at'), pod_name)
-            # self.kill_pod(pod_name, self.namespace)
-
-        elif not is_stale and not is_valid_pod:
-            self.logger.info('Key `%s` in queue `%s` was last updated by pod '
-                             '`%s`, but that pod does not exist.',
-                             key, self.cleaning_queue, pod_name)
-
-        else:
-            self.logger.info('Key `%s` in queue `%s` was last updated at `%s` '
-                             'by pod `%s` which no longer exists.',
-                             key, self.cleaning_queue,
-                             hvals.get('updated_at'), pod_name)
-
-        key_status = hvals.get('status')
-
-        # key is stale, must be repaired somehow
-        if key_status in {'done', 'failed'}:
-            # job is finished, no need to restart the key
-            return bool(self.remove_key_from_queue(key))
-
-        # if the job is finished, no need to restart the key
-        return bool(self.repair_redis_key(key))
+        return should_clean
 
     def clean(self):
         cleaned = 0
