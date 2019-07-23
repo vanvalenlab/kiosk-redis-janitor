@@ -222,17 +222,17 @@ class RedisJanitor(object):
             return False  # this is too fresh for our pod data
 
         if self.is_valid_pod(pod_name):  # pod exists in a valid state
-            if not self.is_stale_update_time(updated_ts):
-                return False  # pod exists and key is updated recently
-
-            # pod exists but key is stale
-            self.logger.warning('Key `%s` in queue `%s` was last updated at '
-                                '`%s` (%s seconds ago) and pod `%s` is still '
-                                'alive with status %s but is_stale turned off.',
-                                key, self.cleaning_queue, updated_ts,
-                                updated_seconds, pod_name,
-                                self.pods[pod_name].status.phase)
-            # self.kill_pod(pod_name, self.namespace)
+            # if not self.is_stale_update_time(updated_ts):
+            #     return False  # pod exists and key is updated recently
+            #
+            # # pod exists but key is stale
+            # self.logger.warning('Key `%s` in queue `%s` was last updated at '
+            #                     '`%s` (%s seconds ago) and pod `%s` is still '
+            #                     'alive with status %s but is_stale turned off.',
+            #                     key, self.cleaning_queue, updated_ts,
+            #                     updated_seconds, pod_name,
+            #                     self.pods[pod_name].status.phase)
+            # # self.kill_pod(pod_name, self.namespace)
             return False
 
         # pod is not valid
