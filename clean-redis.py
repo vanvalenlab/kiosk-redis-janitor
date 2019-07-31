@@ -80,6 +80,10 @@ if __name__ == '__main__':
 
     all_janitors = {}
 
+    queues = ' and '.join('`%s:*`' % q for q in janitor.processing_queues)
+    _logger.info('Janitor initialized. Cleaning queues `%s` and %s every %ss.',
+                 janitor.queue, queues, INTERVAL)
+
     for queue in set(QUEUE.split(QUEUE_DELIMITER)):
         janitor = redis_janitor.RedisJanitor(
             redis_client=REDIS,
