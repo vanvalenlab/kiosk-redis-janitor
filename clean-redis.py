@@ -70,6 +70,7 @@ if __name__ == '__main__':
     INTERVAL = decouple.config('INTERVAL', default=20, cast=int)
     QUEUE = decouple.config('QUEUE', default='predict')
     STALE_TIME = decouple.config('STALE_TIME', default='600', cast=int)
+    QUEUE_DELIMITER = decouple.config('QUEUE_DELIMITER', default=',')
 
     _logger = logging.getLogger(__file__)
 
@@ -80,11 +81,13 @@ if __name__ == '__main__':
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
         queue=QUEUE,
+        queue_delimiter=QUEUE_DELIMITER,
         stale_time=STALE_TIME)
 
+    base_queues = ' and '.join('`%s`' % q for q in janitor.queues)
     queues = ' and '.join('`%s:*`' % q for q in janitor.processing_queues)
-    _logger.info('Janitor initialized. Cleaning queues `%s` and %s every %ss.',
-                 janitor.queue, queues, INTERVAL)
+    _logger.info('Janitor initialized. Cleaning queues %s and %s every %ss.',
+                 base_queues, queues, INTERVAL)
 
     while True:
         try:

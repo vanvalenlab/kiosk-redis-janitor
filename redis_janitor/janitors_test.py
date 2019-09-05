@@ -351,17 +351,23 @@ class TestJanitor(object):
         assert janitor.clean_key('stalekey:inprogress') is True
 
     def test_clean(self):
-        queue = 'q'
-        janitor = self.get_client(queue=queue)
+        queues = 'q1,q2'
+        num_queues = len(queues.split(','))
+        janitor = self.get_client(queue=queues)
         whitelisted = janitor.whitelisted_pods[0]
-        janitor.redis_client.keys = [
-            'processing-{q}:pod'.format(q=queue),
-            'processing-{q}:{pod}'.format(q=queue, pod=whitelisted),
-            'processing-{q}:pod'.format(q=queue),
-            'other key',
-        ]
+
+        keys = []
+        for q in queues.split(','):
+            keys.extend([
+                'processing-{q}:pod'.format(q=q),
+                'processing-{q}:{pod}'.format(q=q, pod=whitelisted),
+                'processing-{q}:pod'.format(q=q),
+            ])
+        keys.append('other key')
+
+        janitor.redis_client.keys = keys
         janitor.clean_key = lambda *x: True
         janitor.is_whitelisted = lambda x: int(x) % 2 == 0
         janitor.lrange = []
         janitor.clean()
-        assert janitor.total_repairs == 3 ** 2  # valid keys ** 2
+        assert janitor.total_repairs == (num_queues * 3) ** 2  # valid_keys**2
