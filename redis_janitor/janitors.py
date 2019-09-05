@@ -51,7 +51,7 @@ class RedisJanitor(object):
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
-        self.queue = str(queue).lower()
+        self.queues = str(queue).lower().split(',')
         self.namespace = namespace
         self.stale_time = int(stale_time)
         self.failure_stale_seconds = failure_stale_seconds
@@ -70,10 +70,12 @@ class RedisJanitor(object):
         }
 
         self.total_repairs = 0
-        self.processing_queues = [
-            'processing-{}'.format(self.queue),
-            'processing-{}-zip'.format(self.queue)
-        ]
+        self.processing_queues = []
+        for q in self.queues:
+            self.processing_queues.extend([
+                'processing-{}'.format(q),
+                'processing-{}-zip'.format(q)
+            ])
         self.cleaning_queue = ''  # update this in clean()
 
     def get_core_v1_client(self):
