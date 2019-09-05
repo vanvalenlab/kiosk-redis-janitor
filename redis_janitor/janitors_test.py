@@ -352,20 +352,22 @@ class TestJanitor(object):
 
     def test_clean(self):
         queues = 'q1,q2'
-        q1, q2 = queues.split(',')
+        num_queues = len(queues.split(','))
         janitor = self.get_client(queue=queues)
         whitelisted = janitor.whitelisted_pods[0]
-        janitor.redis_client.keys = [
-            'processing-{q}:pod'.format(q=q1),
-            'processing-{q}:{pod}'.format(q=q1, pod=whitelisted),
-            'processing-{q}:pod'.format(q=q1),
-            'processing-{q}:pod'.format(q=q2),
-            'processing-{q}:{pod}'.format(q=q2, pod=whitelisted),
-            'processing-{q}:pod'.format(q=q2),
-            'other key',
-        ]
+
+        keys = []
+        for q in queues.split(','):
+            keys.extend([
+                'processing-{q}:pod'.format(q=q),
+                'processing-{q}:{pod}'.format(q=q, pod=whitelisted),
+                'processing-{q}:pod'.format(q=q),
+            ])
+        keys.append('other key')
+
+        janitor.redis_client.keys = keys
         janitor.clean_key = lambda *x: True
         janitor.is_whitelisted = lambda x: int(x) % 2 == 0
         janitor.lrange = []
         janitor.clean()
-        assert janitor.total_repairs == 6 ** 2  # valid keys ** 2
+        assert janitor.total_repairs == (num_queues * 3) ** 2  # valid_keys**2
