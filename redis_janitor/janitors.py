@@ -43,6 +43,7 @@ class RedisJanitor(object):
     def __init__(self,
                  redis_client,
                  queue,
+                 queue_delimiter=',',
                  namespace='default',
                  backoff=3,
                  stale_time=600,  # 10 minutes
@@ -51,7 +52,7 @@ class RedisJanitor(object):
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
         self.backoff = backoff
-        self.queues = str(queue).lower().split(',')
+        self.queues = str(queue).lower().split(queue_delimiter)
         self.namespace = namespace
         self.stale_time = int(stale_time)
         self.failure_stale_seconds = failure_stale_seconds

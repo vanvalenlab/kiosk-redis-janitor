@@ -81,28 +81,16 @@ if __name__ == '__main__':
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
         queue=QUEUE,
+        queue_delimiter=QUEUE_DELIMITER,
         stale_time=STALE_TIME)
 
     queues = ' and '.join('`%s:*`' % q for q in janitor.processing_queues)
     _logger.info('Janitor initialized. Cleaning queues `%s` and %s every %ss.',
                  janitor.queue, queues, INTERVAL)
 
-    for queue in set(QUEUE.split(QUEUE_DELIMITER)):
-        janitor = redis_janitor.RedisJanitor(
-            redis_client=REDIS,
-            queue=queue,
-            stale_time=STALE_TIME)
-
-        all_janitors[queue] = janitor
-
-        _logger.info('Janitors initialized. '
-                     'Cleaning queues `%s` and `%s:*` every `%s` seconds.',
-                     janitor.queue, janitor.processing_queue, INTERVAL)
-
     while True:
         try:
-            for q, j in all_janitors.items():
-                j.clean()
+            janitor.clean()
             time.sleep(INTERVAL)
         except Exception as err:  # pylint: disable=broad-except
             _logger.critical('Fatal Error: %s: %s', type(err).__name__, err)
