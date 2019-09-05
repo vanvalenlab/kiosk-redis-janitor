@@ -78,7 +78,10 @@ if __name__ == '__main__':
         decouple.config('REDIS_HOST', default='redis-master'),
         decouple.config('REDIS_PORT', default=6379, cast=int))
 
-    all_janitors = {}
+    janitor = redis_janitor.RedisJanitor(
+        redis_client=REDIS,
+        queue=QUEUE,
+        stale_time=STALE_TIME)
 
     queues = ' and '.join('`%s:*`' % q for q in janitor.processing_queues)
     _logger.info('Janitor initialized. Cleaning queues `%s` and %s every %ss.',
