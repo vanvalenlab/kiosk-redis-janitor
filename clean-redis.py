@@ -68,7 +68,9 @@ if __name__ == '__main__':
     initialize_logger(decouple.config('DEBUG', default=True, cast=bool))
 
     INTERVAL = decouple.config('INTERVAL', default=20, cast=int)
+    # support deprecated QUEUE variable, but pass as default QUEUES value
     QUEUE = decouple.config('QUEUE', default='predict')
+    QUEUES = decouple.config('QUEUES', default=QUEUE)
     STALE_TIME = decouple.config('STALE_TIME', default='600', cast=int)
     QUEUE_DELIMITER = decouple.config('QUEUE_DELIMITER', default=',')
 
@@ -80,7 +82,7 @@ if __name__ == '__main__':
 
     janitor = redis_janitor.RedisJanitor(
         redis_client=REDIS,
-        queue=QUEUE,
+        queue=QUEUES,
         queue_delimiter=QUEUE_DELIMITER,
         stale_time=STALE_TIME)
 
