@@ -3,11 +3,11 @@
 [![Build Status](https://travis-ci.com/vanvalenlab/kiosk-redis-janitor.svg?branch=master)](https://travis-ci.com/vanvalenlab/kiosk-redis-janitor)
 [![Coverage Status](https://coveralls.io/repos/github/vanvalenlab/kiosk-redis-janitor/badge.svg?branch=master)](https://coveralls.io/github/vanvalenlab/kiosk-redis-janitor?branch=master)
 
-The DeepCell Kiosk uses Redis to implement a [reliable queue](https://redis.io/commands/rpoplpush#pattern-reliable-queue). The Janitor watches the processing queues and moves any invalid processing items back to the work queue. This ensures that no work items end up in stranded processing queues, and all work is finished in a timely fashion.
+The DeepCell Kiosk uses Redis to implement a [reliable queue](https://redis.io/commands/rpoplpush#pattern-reliable-queue), which moves items from the work queue into processing queues to prevent any items falling out of the queue. The janitor watches the processing queues and moves any invalid processing items back to the work queue. This ensures that no work items end up in stranded processing queues, and all work is finished in a timely fashion.
 
 ## Configuration
 
-The Janitor is configured using environment variables. Please find a table of all environment variables and their description below.
+The janitor is configured using environment variables. Please find a table of all environment variables and their descriptions below.
 
 | Name | Description | Default Value |
 | :---: | :---: | :---: |
