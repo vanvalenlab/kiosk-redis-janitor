@@ -10,7 +10,7 @@ The DeepCell Kiosk uses Redis to implement a [reliable queue](https://redis.io/c
 The janitor is configured using environment variables. Please find a table of all environment variables and their descriptions below.
 
 | Name | Description | Default Value |
-| :---: | :---: | :---: |
+| :--- | :--- | :--- |
 | `INTERVAL` | How frequently the Janitor checks for stale items, in seconds. | `20` |
 | `QUEUES` | A `QUEUE_DELIMITER` separated list of work queues to monitor. | `predict` |
 | `QUEUE` | *Deprecated in favor of `QUEUES`*. | `predict` |
