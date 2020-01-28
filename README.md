@@ -16,5 +16,5 @@ The janitor is configured using environment variables. Please find a table of al
 | `QUEUE` | *Deprecated in favor of `QUEUES`*. | `predict` |
 | `QUEUE_DELIMITER` | A string used to separate a list of queue names in `QUEUES`. | `,` |
 | `REDIS_HOST` | The IP address or hostname of Redis. | `redis-master` |
-| `REDIS_PORT` | The port of Redis. | `6379` |
+| `REDIS_PORT` | The port used to connect to Redis. | `6379` |
 | `STALE_TIME` | The time after which a job is "stale", in seconds.  | `600` |
