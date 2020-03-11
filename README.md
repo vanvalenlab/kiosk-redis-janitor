@@ -2,7 +2,7 @@
 
 [![Build Status](https://travis-ci.com/vanvalenlab/kiosk-redis-janitor.svg?branch=master)](https://travis-ci.com/vanvalenlab/kiosk-redis-janitor)
 [![Coverage Status](https://coveralls.io/repos/github/vanvalenlab/kiosk-redis-janitor/badge.svg?branch=master)](https://coveralls.io/github/vanvalenlab/kiosk-redis-janitor?branch=master)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/vanvalenlab/kiosk-redis-janitor/blob/master/LICENSE)
 
 The DeepCell Kiosk uses Redis to implement a [reliable queue](https://redis.io/commands/rpoplpush#pattern-reliable-queue), which moves items from the work queue into processing queues to prevent any items falling out of the queue. The janitor watches the processing queues and moves any invalid processing items back to the work queue. This ensures that no work items end up in stranded processing queues, and all work is finished in a timely fashion.
 
