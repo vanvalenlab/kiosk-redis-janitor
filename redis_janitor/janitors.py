@@ -168,7 +168,7 @@ class RedisJanitor(object):
 
     def _update_pods(self):
         """Refresh pod data and update timestamp"""
-        namespaced_pods = self.list_namespaced_pod()
+        namespaced_pods = self.list_pod_for_all_namespaces()
         self.pods = {pod.metadata.name: pod.status.phase
                      for pod in namespaced_pods}
         self.pods_updated_at = datetime.datetime.now(pytz.UTC)
