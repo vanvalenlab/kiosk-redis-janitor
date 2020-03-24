@@ -47,7 +47,6 @@ class RedisJanitor(object):
                  namespace='default',
                  backoff=3,
                  stale_time=600,  # 10 minutes
-                 failure_stale_seconds=60,
                  pod_refresh_interval=5,):
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
@@ -55,7 +54,6 @@ class RedisJanitor(object):
         self.queues = str(queue).lower().split(queue_delimiter)
         self.namespace = namespace
         self.stale_time = int(stale_time)
-        self.failure_stale_seconds = failure_stale_seconds
         self.pod_refresh_interval = int(pod_refresh_interval)
 
         # empty initializers, update them with _update_pods
