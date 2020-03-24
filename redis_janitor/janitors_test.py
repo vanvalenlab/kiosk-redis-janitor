@@ -221,7 +221,24 @@ class TestJanitor(object):
         assert int(janitor.remove_key_from_queue(valid_key)) == 1
         assert int(janitor.remove_key_from_queue(invalid_key)) == 0
 
-    def test__udpate_pods(self):
+    def test_repair_redis_key(self):
+        janitor = self.get_client()
+
+        def remove_key(_):
+            return True
+
+        # Remove key and put it back in the work queue
+        janitor.remove_key_from_queue = remove_key
+        janitor.repair_redis_key('testkey')
+
+        def fail_to_remove(_):
+            return False
+
+        # Could not remove key, should log it.
+        janitor.remove_key_from_queue = fail_to_remove
+        janitor.repair_redis_key('testkey')
+
+    def test__update_pods(self):
         janitor = self.get_client()
         janitor._update_pods()
         # pylint: disable=E1101
