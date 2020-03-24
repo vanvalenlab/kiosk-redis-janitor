@@ -186,11 +186,7 @@ class RedisJanitor(object):
 
     def is_valid_pod(self, pod_name):
         self.update_pods()  # only updates if stale
-        is_valid = False
-        if pod_name in self.pods:
-            pod_phase = self.pods[pod_name]
-            if pod_phase in self.valid_pod_phases:
-                is_valid = True
+        is_valid = self.pods.get(pod_name) in self.valid_pod_phases
         return is_valid
 
     def _timestamp_to_age(self, ts):
