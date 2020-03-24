@@ -271,7 +271,7 @@ class RedisJanitor(object):
     def clean(self):
         cleaned = 0
 
-        for q in self.get_processing_keys(count=1000):
+        for q in self.get_processing_keys(count=100):
             self.cleaning_queue = q
             for i, key in enumerate(self.redis_client.lrange(q, 0, -1)):
                 if i >= 1:
