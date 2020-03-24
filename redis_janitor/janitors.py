@@ -287,3 +287,8 @@ class RedisJanitor(object):
             self.total_repairs += cleaned
             self.logger.info('Repaired %s key%s (%s total).', cleaned,
                              's' if cleaned else '', self.total_repairs)
+
+        # reset state to like new
+        self.cleaning_queue = ''
+        self.pods = {}
+        self.pods_updated_at = None
