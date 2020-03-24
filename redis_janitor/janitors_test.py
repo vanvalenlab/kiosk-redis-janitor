@@ -230,10 +230,8 @@ class TestJanitor(object):
         assert isinstance(janitor.pods_updated_at, datetime.datetime)
         assert len(janitor.pods) == len(expected)
         for e in expected:
-            name = e.metadata.name
-            assert name in janitor.pods
-            assert janitor.pods[name].metadata.name == name
-            assert janitor.pods[name].status.phase == e.status.phase
+            assert e.metadata.name in janitor.pods
+            assert janitor.pods[e.metadata.name] == e.status.phase
 
     def test_udpate_pods(self):
         janitor = self.get_client(pod_refresh_interval=10000)
@@ -244,10 +242,8 @@ class TestJanitor(object):
         assert isinstance(janitor.pods_updated_at, datetime.datetime)
         assert len(janitor.pods) == len(expected)
         for e in expected:
-            name = e.metadata.name
-            assert name in janitor.pods
-            assert janitor.pods[name].metadata.name == name
-            assert janitor.pods[name].status.phase == e.status.phase
+            assert e.metadata.name in janitor.pods
+            assert janitor.pods[e.metadata.name] == e.status.phase
 
         # now that we've called it once, lets make sure it doesnt happen again
         janitor.pods = {}  # resetting this for test

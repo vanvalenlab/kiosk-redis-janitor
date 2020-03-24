@@ -169,7 +169,8 @@ class RedisJanitor(object):
     def _update_pods(self):
         """Refresh pod data and update timestamp"""
         namespaced_pods = self.list_pod_for_all_namespaces()
-        self.pods = {pod.metadata.name: pod for pod in namespaced_pods}
+        self.pods = {pod.metadata.name: pod.status.phase
+                     for pod in namespaced_pods}
         self.pods_updated_at = datetime.datetime.now(pytz.UTC)
 
     def update_pods(self):
@@ -189,7 +190,7 @@ class RedisJanitor(object):
         self.update_pods()  # only updates if stale
         is_valid = False
         if pod_name in self.pods:
-            pod_phase = self.pods[pod_name].status.phase
+            pod_phase = self.pods[pod_name]
             if pod_phase in self.valid_pod_phases:
                 is_valid = True
         return is_valid
@@ -234,7 +235,7 @@ class RedisJanitor(object):
             #                     'alive with status %s but is_stale turned off.',
             #                     key, self.cleaning_queue, updated_ts,
             #                     updated_seconds, pod_name,
-            #                     self.pods[pod_name].status.phase)
+            #                     self.pods[pod_name])
             # # self.kill_pod(pod_name, self.namespace)
             return False
 
@@ -248,7 +249,7 @@ class RedisJanitor(object):
             self.logger.info('Key `%s` in queue `%s` was last updated by '
                              'pod `%s` %s seconds ago, but that pod has status'
                              ' %s.', key, self.cleaning_queue, pod_name,
-                             updated_seconds, self.pods[pod_name].status.phase)
+                             updated_seconds, self.pods[pod_name])
         return True
 
     def clean_key(self, key):
