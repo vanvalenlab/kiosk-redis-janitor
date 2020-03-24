@@ -211,7 +211,7 @@ class RedisJanitor(object):
         stale_time = stale_time if stale_time else self.stale_time
         if not updated_time:
             return False
-        if not stale_time > 0:
+        if stale_time <= 0:
             return False
         last_updated = self._timestamp_to_age(updated_time)
         return last_updated >= stale_time
@@ -259,7 +259,7 @@ class RedisJanitor(object):
             'updated_by',
         ]
         res = self.redis_client.hmget(key, *required_keys)
-        hvals = {k: v for k, v in zip(required_keys, res)}
+        hvals = dict(zip(required_keys, res))
 
         should_clean = self.should_clean_key(key, hvals.get('updated_at'))
 
