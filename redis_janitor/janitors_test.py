@@ -221,7 +221,24 @@ class TestJanitor(object):
         assert int(janitor.remove_key_from_queue(valid_key)) == 1
         assert int(janitor.remove_key_from_queue(invalid_key)) == 0
 
-    def test__udpate_pods(self):
+    def test_repair_redis_key(self):
+        janitor = self.get_client()
+
+        def remove_key(_):
+            return True
+
+        # Remove key and put it back in the work queue
+        janitor.remove_key_from_queue = remove_key
+        janitor.repair_redis_key('testkey')
+
+        def fail_to_remove(_):
+            return False
+
+        # Could not remove key, should log it.
+        janitor.remove_key_from_queue = fail_to_remove
+        janitor.repair_redis_key('testkey')
+
+    def test__update_pods(self):
         janitor = self.get_client()
         janitor._update_pods()
         # pylint: disable=E1101
@@ -230,10 +247,8 @@ class TestJanitor(object):
         assert isinstance(janitor.pods_updated_at, datetime.datetime)
         assert len(janitor.pods) == len(expected)
         for e in expected:
-            name = e.metadata.name
-            assert name in janitor.pods
-            assert janitor.pods[name].metadata.name == name
-            assert janitor.pods[name].status.phase == e.status.phase
+            assert e.metadata.name in janitor.pods
+            assert janitor.pods[e.metadata.name] == e.status.phase
 
     def test_udpate_pods(self):
         janitor = self.get_client(pod_refresh_interval=10000)
@@ -244,10 +259,8 @@ class TestJanitor(object):
         assert isinstance(janitor.pods_updated_at, datetime.datetime)
         assert len(janitor.pods) == len(expected)
         for e in expected:
-            name = e.metadata.name
-            assert name in janitor.pods
-            assert janitor.pods[name].metadata.name == name
-            assert janitor.pods[name].status.phase == e.status.phase
+            assert e.metadata.name in janitor.pods
+            assert janitor.pods[e.metadata.name] == e.status.phase
 
         # now that we've called it once, lets make sure it doesnt happen again
         janitor.pods = {}  # resetting this for test

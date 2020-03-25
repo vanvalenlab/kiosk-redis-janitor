@@ -47,7 +47,6 @@ class RedisJanitor(object):
                  namespace='default',
                  backoff=3,
                  stale_time=600,  # 10 minutes
-                 failure_stale_seconds=60,
                  pod_refresh_interval=5,):
         self.redis_client = redis_client
         self.logger = logging.getLogger(str(self.__class__.__name__))
@@ -55,7 +54,6 @@ class RedisJanitor(object):
         self.queues = str(queue).lower().split(queue_delimiter)
         self.namespace = namespace
         self.stale_time = int(stale_time)
-        self.failure_stale_seconds = failure_stale_seconds
         self.pod_refresh_interval = int(pod_refresh_interval)
 
         # empty initializers, update them with _update_pods
@@ -169,7 +167,8 @@ class RedisJanitor(object):
     def _update_pods(self):
         """Refresh pod data and update timestamp"""
         namespaced_pods = self.list_pod_for_all_namespaces()
-        self.pods = {pod.metadata.name: pod for pod in namespaced_pods}
+        self.pods = {pod.metadata.name: pod.status.phase
+                     for pod in namespaced_pods}
         self.pods_updated_at = datetime.datetime.now(pytz.UTC)
 
     def update_pods(self):
@@ -187,11 +186,7 @@ class RedisJanitor(object):
 
     def is_valid_pod(self, pod_name):
         self.update_pods()  # only updates if stale
-        is_valid = False
-        if pod_name in self.pods:
-            pod_phase = self.pods[pod_name].status.phase
-            if pod_phase in self.valid_pod_phases:
-                is_valid = True
+        is_valid = self.pods.get(pod_name) in self.valid_pod_phases
         return is_valid
 
     def _timestamp_to_age(self, ts):
@@ -210,7 +205,7 @@ class RedisJanitor(object):
         stale_time = stale_time if stale_time else self.stale_time
         if not updated_time:
             return False
-        if not stale_time > 0:
+        if stale_time <= 0:
             return False
         last_updated = self._timestamp_to_age(updated_time)
         return last_updated >= stale_time
@@ -234,7 +229,7 @@ class RedisJanitor(object):
             #                     'alive with status %s but is_stale turned off.',
             #                     key, self.cleaning_queue, updated_ts,
             #                     updated_seconds, pod_name,
-            #                     self.pods[pod_name].status.phase)
+            #                     self.pods[pod_name])
             # # self.kill_pod(pod_name, self.namespace)
             return False
 
@@ -248,7 +243,7 @@ class RedisJanitor(object):
             self.logger.info('Key `%s` in queue `%s` was last updated by '
                              'pod `%s` %s seconds ago, but that pod has status'
                              ' %s.', key, self.cleaning_queue, pod_name,
-                             updated_seconds, self.pods[pod_name].status.phase)
+                             updated_seconds, self.pods[pod_name])
         return True
 
     def clean_key(self, key):
@@ -258,7 +253,7 @@ class RedisJanitor(object):
             'updated_by',
         ]
         res = self.redis_client.hmget(key, *required_keys)
-        hvals = {k: v for k, v in zip(required_keys, res)}
+        hvals = dict(zip(required_keys, res))
 
         should_clean = self.should_clean_key(key, hvals.get('updated_at'))
 
@@ -292,3 +287,8 @@ class RedisJanitor(object):
             self.total_repairs += cleaned
             self.logger.info('Repaired %s key%s (%s total).', cleaned,
                              's' if cleaned else '', self.total_repairs)
+
+        # reset state to like new
+        self.cleaning_queue = ''
+        self.pods = {}
+        self.pods_updated_at = None
