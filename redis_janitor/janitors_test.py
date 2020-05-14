@@ -363,6 +363,11 @@ class TestJanitor(object):
         janitor.cleaning_queue = 'processing-q:bad'
         assert janitor.clean_key('stalekey:inprogress') is True
 
+        # test invalid key is removed
+        janitor.cleaning_queue = 'processing-q:bad'
+        janitor.redis_client.hmget = lambda x, *y: [None] * len(y)
+        assert janitor.clean_key('stalekey:inprogress') is True
+
     def test_clean(self):
         queues = 'q1,q2'
         num_queues = len(queues.split(','))
