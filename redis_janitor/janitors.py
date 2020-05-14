@@ -214,9 +214,8 @@ class RedisJanitor(object):
         """Return a boolean if the key should be cleaned"""
         pod_name = self.cleaning_queue.split(':')[-1]
 
-        updated_seconds = self._timestamp_to_age(updated_ts)
-
         if updated_seconds <= self.pod_refresh_interval * 3:
+            self.logger.debug('%s is "fresh" updated seconds', updated_seconds)
             return False  # this is too fresh for our pod data
 
         if self.is_valid_pod(pod_name):  # pod exists in a valid state
@@ -231,6 +230,7 @@ class RedisJanitor(object):
             #                     updated_seconds, pod_name,
             #                     self.pods[pod_name])
             # # self.kill_pod(pod_name, self.namespace)
+            self.logger.debug('%s is a valid pod name', pod_name)
             return False
 
         # pod is not valid
@@ -254,6 +254,10 @@ class RedisJanitor(object):
         ]
         res = self.redis_client.hmget(key, *required_keys)
         hvals = dict(zip(required_keys, res))
+
+        if not any(res):  # No values found in the key
+            self.logger.warning('Removing invalid key `%s`.', key)
+            return bool(self.remove_key_from_queue(key))
 
         should_clean = self.should_clean_key(key, hvals.get('updated_at'))
 
