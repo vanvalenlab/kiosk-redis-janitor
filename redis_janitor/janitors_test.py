@@ -34,9 +34,27 @@ import datetime
 import pytz
 import kubernetes
 
+import fakeredis
 import pytest
 
 from redis_janitor import janitors
+
+
+@pytest.fixture
+def redis_client():
+    yield fakeredis.FakeStrictRedis(decode_responses='utf8')
+
+
+@pytest.fixture
+def janitor(mocker, redis_client):  # pylint: disable=W0621
+    mocker.patch('kubernetes.config.load_incluster_config')
+    mocker.patch('kubernetes.client.CoreV1Api', DummyKubernetes)
+    queues = 'p,q'
+    yield janitors.RedisJanitor(redis_client, queues, backoff=0)
+
+
+def kube_error(*_, **__):
+    raise kubernetes.client.rest.ApiException('thrown on purpose')
 
 
 class Bunch(object):
@@ -44,105 +62,19 @@ class Bunch(object):
         self.__dict__.update(kwds)
 
 
-class DummyRedis(object):
-    # pylint: disable=W0613,R0201
-    def __init__(self, prefix='predict', status='new'):
-        self.fail_count = 0
-        self.prefix = '/'.join(x for x in prefix.split('/') if x)
-        self.status = status
-        self.keys = [
-            '{}:{}:{}'.format(self.prefix, self.status, 'x.tiff'),
-            '{}:{}:{}'.format(self.prefix, 'other', 'x.zip'),
-            '{}:{}:{}'.format('other', self.status, 'x.TIFF'),
-            '{}:{}:{}'.format(self.prefix, self.status, 'x.ZIP'),
-            '{}:{}:{}'.format(self.prefix, 'other', 'x.tiff'),
-            '{}:{}:{}'.format('other', self.status, 'x.zip'),
-        ]
-
-    def _get_dummy_data(self, rhash, identity, updated):
-        return {
-            'model_name': 'model',
-            'model_version': '0',
-            'field': '61',
-            'cuts': '0',
-            'updated_by': identity,
-            'status': rhash.split(':')[-1],
-            'postprocess_function': '',
-            'preprocess_function': '',
-            'file_name': rhash.split(':')[-1],
-            'input_file_name': rhash.split(':')[-1],
-            'output_file_name': rhash.split(':')[-1],
-            'updated_at': updated,
-        }
-
-    def scan_iter(self, match=None, count=None):
-        for k in self.keys:
-            if match:
-                if k.startswith(match[:-1]):
-                    yield k
-            else:
-                yield k
-
-    def lrem(self, key, count, value, *_, **kwargs):
-        return count
-
-    def lpush(self, *_, **__):
-        return len(self.keys)
-
-    def hmset(self, rhash, hvals):
-        return True
-
-    def hset(self, rhash, status, value):
-        return True
-
-    def lrange(self, queue, start, end):
-        return self.keys[start:end]
-
-    def hmget(self, rhash, *keys):
-        now = datetime.datetime.now(pytz.UTC)
-        later = (now - datetime.timedelta(minutes=60))
-        identity = 'good_pod' if 'good' in rhash else 'bad_pod'
-        identity = 'zip-consumer' if 'whitelist' in rhash else identity
-        updated = (later if 'stale' in rhash else now).isoformat(' ')
-        updated = None if 'malformed' in rhash else updated
-        dummy = self._get_dummy_data(rhash, identity, updated)
-        return [dummy.get(k) for k in keys]
-
-    def hgetall(self, rhash):
-        now = datetime.datetime.now(pytz.UTC)
-        later = (now - datetime.timedelta(minutes=60))
-        identity = 'good_pod' if 'good' in rhash else 'bad_pod'
-        identity = 'zip-consumer' if 'whitelist' in rhash else identity
-        updated = (later if 'stale' in rhash else now).isoformat(' ')
-        updated = None if 'malformed' in rhash else updated
-        dummy = self._get_dummy_data(rhash, identity, updated)
-        return dummy
-
-    def type(self, key):
-        return 'hash'
-
-
 class DummyKubernetes(object):
-
-    def __init__(self, fail=False):
-        self.fail = fail
+    # pylint: disable=R0201
 
     def delete_namespaced_pod(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return True
 
     def list_pod_for_all_namespaces(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(status=Bunch(phase='Running'),
                                   metadata=Bunch(name='pod')),
                             Bunch(status=Bunch(phase='Evicted'),
                                   metadata=Bunch(name='badpod'))])
 
     def list_namespaced_pod(self, *_, **__):
-        if self.fail:
-            raise kubernetes.client.rest.ApiException('thrown on purpose')
         return Bunch(items=[Bunch(status=Bunch(phase='Running'),
                                   metadata=Bunch(name='pod')),
                             Bunch(status=Bunch(phase='Evicted'),
@@ -150,28 +82,16 @@ class DummyKubernetes(object):
 
 
 class TestJanitor(object):
+    # pylint: disable=W0621,R0201
 
-    def get_client(self, **kwargs):
-        if 'backoff' not in kwargs:
-            kwargs['backoff'] = 0.01
-        if 'queue' not in kwargs:
-            kwargs['queue'] = 'q'
-        if 'redis_client' not in kwargs:
-            kwargs['redis_client'] = DummyRedis()
-        janitor = janitors.RedisJanitor(**kwargs)
-        janitor.get_core_v1_client = DummyKubernetes
-        return janitor
-
-    def test_kill_pod(self):
-        janitor = self.get_client()
+    def test_kill_pod(self, mocker, janitor):
         assert janitor.kill_pod('pass', 'ns') is True
 
-        janitor.get_core_v1_client = lambda: DummyKubernetes(fail=True)
+        mocker.patch('kubernetes.client.CoreV1Api.delete_namespaced_pod',
+                     kube_error)
         assert janitor.kill_pod('fail', 'ns') is False
 
-    def test_list_pod_for_all_namespaces(self):
-        janitor = self.get_client()
-
+    def test_list_pod_for_all_namespaces(self, mocker, janitor):
         expected = DummyKubernetes().list_pod_for_all_namespaces()
         expected = expected.items  # pylint: disable=E1101
         items = janitor.list_pod_for_all_namespaces()
@@ -180,14 +100,13 @@ class TestJanitor(object):
             assert items[i].metadata.name == expected[i].metadata.name
             assert items[i].status.phase == expected[i].status.phase
 
-        janitor.get_core_v1_client = lambda: DummyKubernetes(fail=True)
+        mocker.patch('kubernetes.client.CoreV1Api.list_pod_for_all_namespaces',
+                     kube_error)
 
         items = janitor.list_pod_for_all_namespaces()
         assert items == []
 
-    def test_list_namespaced_pods(self):
-        janitor = self.get_client()
-
+    def test_list_namespaced_pods(self, mocker, janitor):
         expected = DummyKubernetes().list_namespaced_pod()
         expected = expected.items  # pylint: disable=E1101
         items = janitor.list_namespaced_pod()
@@ -195,51 +114,39 @@ class TestJanitor(object):
             assert items[i].metadata.name == expected[i].metadata.name
             assert items[i].status.phase == expected[i].status.phase
 
-        janitor.get_core_v1_client = lambda: DummyKubernetes(fail=True)
-
+        mocker.patch('kubernetes.client.CoreV1Api.list_namespaced_pod', kube_error)
         items = janitor.list_namespaced_pod()
         assert items == []
 
-    def test_is_whitelisted(self):
-        janitor = self.get_client()
-
+    def test_is_whitelisted(self, janitor):
         janitor.whitelisted_pods = ['pod1', 'pod2']
         assert janitor.is_whitelisted('pod1-123-456') is True
         assert janitor.is_whitelisted('pod2-123-456') is True
         assert janitor.is_whitelisted('pod3-123-456') is False
 
-    def test_remove_key_from_queue(self):
-        janitor = self.get_client()
-
-        def dummy_lrem(key, count, value):
-            total = sum(value == k for k in janitor.redis_client.keys)
-            return int(total >= count)
-
-        janitor.redis_client.lrem = dummy_lrem
-        valid_key = janitor.redis_client.keys[0]
-        invalid_key = 'badkey'
+    def test_remove_key_from_queue(self, janitor):
+        # get a queue and put a key in it.
+        q = '{}:pod'.format(random.choice(janitor.processing_queues))
+        janitor.cleaning_queue = q
+        valid_key = random.randint(1, 10)
+        invalid_key = random.randint(11, 20)
+        janitor.redis_client.lpush(q, valid_key)
+        # test remove the key in the queue is successful
         assert int(janitor.remove_key_from_queue(valid_key)) == 1
+        # test removing key not in the queue fails
         assert int(janitor.remove_key_from_queue(invalid_key)) == 0
 
-    def test_repair_redis_key(self):
-        janitor = self.get_client()
-
-        def remove_key(_):
-            return True
-
+    def test_repair_redis_key(self, janitor):
         # Remove key and put it back in the work queue
-        janitor.remove_key_from_queue = remove_key
-        janitor.repair_redis_key('testkey')
-
-        def fail_to_remove(_):
-            return False
-
+        q = '{}:pod'.format(random.choice(janitor.processing_queues))
+        janitor.cleaning_queue = q
+        key = 'test_key'
+        janitor.redis_client.lpush(q, key)
+        assert janitor.repair_redis_key(key)
         # Could not remove key, should log it.
-        janitor.remove_key_from_queue = fail_to_remove
-        janitor.repair_redis_key('testkey')
+        assert not janitor.repair_redis_key('other key')
 
-    def test__update_pods(self):
-        janitor = self.get_client()
+    def test__update_pods(self, janitor):
         janitor._update_pods()
         # pylint: disable=E1101
         expected = DummyKubernetes().list_namespaced_pod().items
@@ -250,8 +157,8 @@ class TestJanitor(object):
             assert e.metadata.name in janitor.pods
             assert janitor.pods[e.metadata.name] == e.status.phase
 
-    def test_udpate_pods(self):
-        janitor = self.get_client(pod_refresh_interval=10000)
+    def test_update_pods(self, janitor):
+        janitor.pod_refresh_interval = 100000
         janitor.update_pods()
         # pylint: disable=E1101
         expected = DummyKubernetes().list_namespaced_pod().items
@@ -276,12 +183,11 @@ class TestJanitor(object):
             janitor.pods_updated_at = 1  # wrong type causes error
             janitor.update_pods()
 
-    def test_is_stale_update_time(self):
+    def test_is_stale_update_time(self, janitor):
         new_time = datetime.datetime.now(pytz.UTC)
         old_time = new_time - datetime.timedelta(days=1)
 
         # first test self.stale_time with default setting (~5 min)
-        janitor = self.get_client()
         assert janitor.is_stale_update_time(old_time) is True
         assert janitor.is_stale_update_time(old_time.isoformat()) is True
         assert janitor.is_stale_update_time(new_time) is False
@@ -291,101 +197,132 @@ class TestJanitor(object):
         # overrid default stale_time - disable
         assert janitor.is_stale_update_time(new_time, -1) is False
         # overrid default stale_time - force stale
-        janitor = self.get_client(stale_time=-1)
+        janitor.stale_time = -1
         assert janitor.is_stale_update_time(old_time, 0.001) is True
 
         # test disabled `stale_time`
-        janitor = self.get_client(stale_time=-1)
         assert janitor.is_stale_update_time(old_time) is False
         assert janitor.is_stale_update_time(new_time) is False
 
         # test invalid update_time
         assert janitor.is_stale_update_time(None) is False
         assert janitor.is_stale_update_time(None, 0) is False
+        assert janitor._timestamp_to_age(None) == 0
 
-    def test_get_processing_keys(self):
-        queue = 'test-queue'
-        janitor = self.get_client(queue=queue)
-        assert [x for x in janitor.get_processing_keys()] == []
+    def test_get_processing_keys(self, janitor):
+        keys = []
+        for i, q in enumerate(janitor.processing_queues):
+            key = '{}:{}'.format(q, i)
+            janitor.redis_client.lpush(q, key)
+            janitor.redis_client.hmset(key, {'test': 1})
+            keys.append(key)
 
-        janitor.redis_client.keys = [
-            'processing-{q}:{pod}'.format(q=queue, pod=random.randint(0, 100)),
-            'processing-{q}:{pod}'.format(q=queue, pod=random.randint(0, 100)),
-            'processing-{q}:{pod}'.format(q=queue, pod=random.randint(0, 100)),
-            'other key',
-        ]
-        expected = janitor.redis_client.keys[0:3]
-        assert [x for x in janitor.get_processing_keys()] == expected
+        for q in janitor.processing_queues:
+            assert isinstance(q, str)
+        # add a weird key that isn't parsed properly
+        keys.append('other key')
 
-    def test_is_valid_pod(self):
-        janitor = self.get_client(stale_time=5)
+        expected = set(keys[:-1])  # not the last one
+        assert set(list(janitor.get_processing_keys())) == expected
+
+        # no processing queues means no processing keys
+        janitor.processing_queues = []
+        assert list(janitor.get_processing_keys()) == []
+
+    def test_is_valid_pod(self, janitor):
         assert janitor.is_valid_pod('pod') is True  # valid pod name
         assert janitor.is_valid_pod('missing') is False
 
-    def test_clean_key(self):
-        janitor = self.get_client(stale_time=5)
-        janitor.cleaning_queue = 'processing-q:pod'
-        # assert janitor.clean_key('stale:new') is True
-        # assert janitor.clean_key('stale:done') is True
-        # assert janitor.clean_key('stale:failed') is True
-        # assert janitor.clean_key('stale:working') is True
-        assert janitor.clean_key('goodkey:new') is False
-        assert janitor.clean_key('goodkey:done') is False
-        assert janitor.clean_key('goodkey:failed') is False
-        assert janitor.clean_key('goodkey:working') is False
-        # janitor.cleaning_queue = 'processing-q:missing'
-        # assert janitor.clean_key('goodkey:working') is True
+    def test_should_clean_key(self, janitor):
+        processing_queue = random.choice(janitor.processing_queues)
+        janitor.pod_refresh_interval = 10
 
-        janitor = self.get_client()
-        janitor.cleaning_queue = 'processing-q:pod'
+        pods = ['pod', 'badpod', 'missing']
 
-        # test status `new`
-        assert janitor.clean_key('predict:new') is False
+        new_time = datetime.datetime.now(pytz.UTC)
+        old_time = new_time - datetime.timedelta(days=1)
+        # set timestamps to ISO format
+        new_time = new_time.isoformat()
+        old_time = old_time.isoformat()
 
-        # test status `done`
-        assert janitor.clean_key('predict:done') is False
+        # test new timestamps are not cleaned for all pod statuses.
+        for pod in pods:
+            # update cleaning queue to properly get pod_name
+            janitor.cleaning_queue = '{}:{}'.format(processing_queue, pod)
+            # test no updated_at time will not be cleaned
+            assert not janitor.should_clean_key(pod, None)
+            # test fresh update time is not cleaned
+            assert not janitor.should_clean_key(pod, new_time)
 
-        janitor = self.get_client(stale_time=60)
-        janitor.cleaning_queue = 'processing-q:pod'
-        # assert janitor.clean_key('goodkeystale:inprogress') is True
+        # test old update time and valid pod is not cleaned
+        expected = [False, True, True]
+        for p, e in zip(pods, expected):
+            janitor.cleaning_queue = '{}:{}'.format(processing_queue, p)
+            assert janitor.should_clean_key('key', old_time) is e
 
-        # test in progress with status = Running with fresh update time
-        # assert janitor.clean_key('goodkey:inprogress') is False
+    def test_clean_key(self, mocker, janitor):
+        q = '{}:pod'.format(random.choice(janitor.processing_queues))
+        janitor.cleaning_queue = q
 
-        # test no `updated_at`
-        assert janitor.clean_key('goodmalformed:inprogress') is False
+        # add value to queue but value is not a redis hash.
+        key = 'test_key'
+        janitor.redis_client.lpush(q, key)
+        spy = mocker.spy(janitor, 'remove_key_from_queue')
+        assert janitor.clean_key(key) is True
+        spy.assert_called_once_with(key)
 
-        # test pod is not found
-        # janitor.cleaning_queue = 'processing-q:bad'
-        # assert janitor.clean_key('goodkey:inprogress') is True
+        # add required data to redis hash
+        new_time = datetime.datetime.now(pytz.UTC)
+        mocker.patch('redis_janitor.janitors.RedisJanitor.should_clean_key',
+                     lambda *x: False)
+        data = {'status': 'new', 'updated_at': new_time.isoformat()}
+        janitor.redis_client.lpush(q, key)
+        janitor.redis_client.hmset(key, data)
+        assert janitor.clean_key(key) is False
 
-        # test pod is not found and stale
-        janitor.cleaning_queue = 'processing-q:bad'
-        assert janitor.clean_key('stalekey:inprogress') is True
+        # test finished status is removed
+        mocker.patch('redis_janitor.janitors.RedisJanitor.should_clean_key',
+                     lambda *x: True)
+        data = {'status': 'done', 'updated_at': new_time.isoformat()}
+        janitor.redis_client.lpush(q, key)
+        janitor.redis_client.hmset(key, data)
+        assert janitor.clean_key(key) is True
+        spy.assert_called_with(key)
 
-        # test invalid key is removed
-        janitor.cleaning_queue = 'processing-q:bad'
-        janitor.redis_client.hmget = lambda x, *y: [None] * len(y)
-        assert janitor.clean_key('stalekey:inprogress') is True
+        # test unfinished status is repaired
+        data = {'status': 'not done', 'updated_at': new_time.isoformat()}
+        janitor.redis_client.lpush(q, key)
+        janitor.redis_client.hmset(key, data)
+        spy = mocker.spy(janitor, 'repair_redis_key')
+        assert janitor.clean_key(key) is True
+        spy.assert_called_once_with(key)
 
-    def test_clean(self):
-        queues = 'q1,q2'
-        num_queues = len(queues.split(','))
-        janitor = self.get_client(queue=queues)
+    def test_clean(self, janitor):
         whitelisted = janitor.whitelisted_pods[0]
-
+        new_time = datetime.datetime.now(pytz.UTC)
+        old_time = new_time - datetime.timedelta(days=1)
         keys = []
-        for q in queues.split(','):
-            keys.extend([
-                'processing-{q}:pod'.format(q=q),
-                'processing-{q}:{pod}'.format(q=q, pod=whitelisted),
-                'processing-{q}:pod'.format(q=q),
-            ])
-        keys.append('other key')
+        data = {
+            'status': 'new',
+            'updated_at': old_time.isoformat(),
+            'updated_by': 'test'
+        }
+        for i, processing_queue in enumerate(janitor.processing_queues):
+            if i == 0:
+                pod = whitelisted
+            elif i == len(janitor.processing_queues) - 1:
+                pod = 'missing'
+            else:
+                pod = 'pod'
 
-        janitor.redis_client.keys = keys
-        janitor.clean_key = lambda *x: True
-        janitor.is_whitelisted = lambda x: int(x) % 2 == 0
-        janitor.lrange = []
+            queue = '{}:{}'.format(processing_queue, pod)
+            key = 'key{}'.format(i)
+            janitor.redis_client.lpush(queue, key)
+            janitor.redis_client.hmset(key, data)
+            keys.append(key)
+            if i == 0:
+                # push duplicate key to queue
+                janitor.redis_client.lpush(queue, key)
+
         janitor.clean()
-        assert janitor.total_repairs == (num_queues * 3) ** 2  # valid_keys**2
+        assert janitor.total_repairs == len(keys) - 2 + 1
