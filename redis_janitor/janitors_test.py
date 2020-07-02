@@ -304,7 +304,7 @@ class TestJanitor(object):
         keys = []
         data = {
             'status': 'new',
-            'updated_at': old_time.isoformat(),
+            'updated_at': str(old_time.isoformat()),
             'updated_by': 'test'
         }
         for i, processing_queue in enumerate(janitor.processing_queues):
