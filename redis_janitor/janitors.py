@@ -193,10 +193,10 @@ class RedisJanitor(object):
         if ts is None:
             return 0  # key is new
 
-        if isinstance(ts, str):
+        if not isinstance(ts, datetime.datetime):
             # TODO: `dateutil` deprecated by python 3.7 `fromisoformat`
             # ts = datetime.datetime.fromisoformat(ts)
-            ts = dateutil.parser.parse(ts)
+            ts = dateutil.parser.parse(str(ts))
         current_time = datetime.datetime.now(pytz.UTC)
         diff = current_time - ts
         return diff.total_seconds()
