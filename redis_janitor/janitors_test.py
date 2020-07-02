@@ -286,7 +286,6 @@ class TestJanitor(object):
         data = {'status': 'done', 'updated_at': new_time.isoformat()}
         janitor.redis_client.lpush(q, key)
         janitor.redis_client.hmset(key, data)
-        spy = mocker.spy(janitor, 'remove_key_from_queue')
         assert janitor.clean_key(key) is True
         spy.assert_called_once_with(key)
 
