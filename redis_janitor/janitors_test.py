@@ -287,7 +287,7 @@ class TestJanitor(object):
         janitor.redis_client.lpush(q, key)
         janitor.redis_client.hmset(key, data)
         assert janitor.clean_key(key) is True
-        spy.assert_called_once_with(key)
+        spy.assert_called_with(key)
 
         # test unfinished status is repaired
         data = {'status': 'not done', 'updated_at': new_time.isoformat()}
@@ -295,7 +295,7 @@ class TestJanitor(object):
         janitor.redis_client.hmset(key, data)
         spy = mocker.spy(janitor, 'repair_redis_key')
         assert janitor.clean_key(key) is True
-        spy.assert_called_with(key)
+        spy.assert_called_once_with(key)
 
     def test_clean(self, janitor):
         whitelisted = janitor.whitelisted_pods[0]
