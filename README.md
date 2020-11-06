@@ -1,6 +1,6 @@
 # ![DeepCell Kiosk Banner](https://raw.githubusercontent.com/vanvalenlab/kiosk-console/master/docs/images/DeepCell_Kiosk_Banner.png)
 
-[![Build Status](https://travis-ci.com/vanvalenlab/kiosk-redis-janitor.svg?branch=master)](https://travis-ci.com/vanvalenlab/kiosk-redis-janitor)
+[![Build Status](https://github.com/vanvalenlab/kiosk-redis-janitor/workflows/build/badge.svg)](https://github.com/vanvalenlab/kiosk-redis-janitor/actions)
 [![Coverage Status](https://coveralls.io/repos/github/vanvalenlab/kiosk-redis-janitor/badge.svg?branch=master)](https://coveralls.io/github/vanvalenlab/kiosk-redis-janitor?branch=master)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](/LICENSE)
 
