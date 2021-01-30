@@ -41,7 +41,7 @@ jobs:
 
     - name: PyTest
       run: |
-        pytest --cov bucket_monitor --pep8
+        pytest --cov redis_janitor --pep8
 
     - name: Coveralls
       env:
