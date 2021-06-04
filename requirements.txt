@@ -1,5 +1,5 @@
 redis>=3.4.1<4
-kubernetes>=17.14.0a1
+kubernetes>=17.17.0
 pytz==2019.1
 python-dateutil>=2.8.0
 python-decouple>=3.1,<4
